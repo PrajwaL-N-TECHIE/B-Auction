@@ -14,7 +14,7 @@ export interface LotPack {
 export const SAMPLE_LOT_PACKS: LotPack[] = [
   {
     id: 'cricket',
-    name: 'Premier Cricket Auction (IPL Style)',
+    name: 'Premier Cricket Auction (IPL Mega Auction)',
     description: 'Iconic all-rounders, batsmen, and pacers with purse balances in Crores (₹).',
     currencySymbol: '₹',
     unitLabel: 'Cr',
@@ -25,21 +25,23 @@ export const SAMPLE_LOT_PACKS: LotPack[] = [
         id: 'lot_c1',
         title: 'Virat Kohli',
         category: 'Top-Order Batsman',
-        description: 'Elite anchor and run machine with unmatched chase consistency.',
+        description: 'Elite anchor and all-time run machine with unmatched chase consistency.',
+        imageUrl: '/players/virat_kohli.jpg',
         basePrice: 2.0,
-        rating: 98,
+        rating: 99,
         stats: [
           { label: 'Role', value: 'Right-Hand Bat' },
           { label: 'Strike Rate', value: '138.4' },
-          { label: 'Avg', value: '52.7' }
+          { label: 'IPL Runs', value: '8,000+' }
         ],
         status: 'upcoming'
       },
       {
         id: 'lot_c2',
         title: 'Jasprit Bumrah',
-        category: 'Spearhead Pacer',
+        category: 'Spearhead Fast Bowler',
         description: 'Deadly yorker specialist and undisputed death-overs maestro.',
+        imageUrl: '/players/jasprit_bumrah.jpg',
         basePrice: 2.0,
         rating: 99,
         stats: [
@@ -54,20 +56,67 @@ export const SAMPLE_LOT_PACKS: LotPack[] = [
         title: 'Rohit Sharma',
         category: 'Power Opener & Captain',
         description: 'Prolific big-hitter with proven 5-time championship leadership.',
+        imageUrl: '/players/rohit_sharma.jpg',
         basePrice: 2.0,
-        rating: 96,
+        rating: 97,
         stats: [
           { label: 'Role', value: 'Opener' },
           { label: 'Strike Rate', value: '142.1' },
-          { label: 'Titles', value: '5' }
+          { label: 'Titles', value: '5 IPL Trophies' }
         ],
         status: 'upcoming'
       },
       {
         id: 'lot_c4',
+        title: 'MS Dhoni',
+        category: 'Wicket-Keeper & Legend Finisher',
+        description: 'Iconic master strategist, legendary captain, and lightning-fast keeper.',
+        imageUrl: '/players/ms_dhoni.jpg',
+        basePrice: 2.0,
+        rating: 98,
+        stats: [
+          { label: 'Role', value: 'WK-Finisher' },
+          { label: 'Dismissals', value: '190+' },
+          { label: 'Titles', value: '5 IPL Trophies' }
+        ],
+        status: 'upcoming'
+      },
+      {
+        id: 'lot_c5',
+        title: 'Suryakumar Yadav',
+        category: '360° Middle-Order Batter',
+        description: 'World #1 T20 innovator capable of hitting any ball behind the keeper.',
+        imageUrl: '/players/suryakumar_yadav.jpg',
+        basePrice: 2.0,
+        rating: 98,
+        stats: [
+          { label: 'Role', value: 'Right-Hand Bat' },
+          { label: 'Strike Rate', value: '174.2' },
+          { label: 'Sixes', value: '120+' }
+        ],
+        status: 'upcoming'
+      },
+      {
+        id: 'lot_c6',
+        title: 'Hardik Pandya',
+        category: 'Pace All-Rounder',
+        description: 'Dynamic finisher and middle-overs enforcer with 140kmph pace.',
+        imageUrl: '/players/hardik_pandya.jpg',
+        basePrice: 2.0,
+        rating: 95,
+        stats: [
+          { label: 'Role', value: 'All-Rounder' },
+          { label: 'Strike Rate', value: '146.8' },
+          { label: 'Bowling Avg', value: '27.4' }
+        ],
+        status: 'upcoming'
+      },
+      {
+        id: 'lot_c7',
         title: 'Rashid Khan',
         category: 'Mystery Leg-Spinner',
-        description: 'World #1 T20 leg spinner with explosive lower-order hitting.',
+        description: 'World-renowned leg spin wizard with explosive lower-order hitting.',
+        imageUrl: '/players/rashid_khan.jpg',
         basePrice: 1.5,
         rating: 97,
         stats: [
@@ -78,30 +127,92 @@ export const SAMPLE_LOT_PACKS: LotPack[] = [
         status: 'upcoming'
       },
       {
-        id: 'lot_c5',
-        title: 'Hardik Pandya',
-        category: 'Pace All-Rounder',
-        description: 'Dynamic finisher and middle-overs enforcer with 140kmph pace.',
-        basePrice: 1.5,
-        rating: 94,
+        id: 'lot_c8',
+        title: 'Rishabh Pant',
+        category: 'Wicket-Keeper Explosive Batter',
+        description: 'Fearless left-handed game-changer with audacious boundary power.',
+        imageUrl: '/players/rishabh_pant.jpg',
+        basePrice: 2.0,
+        rating: 96,
         stats: [
-          { label: 'Role', value: 'All-Rounder' },
-          { label: 'Strike Rate', value: '146.8' },
-          { label: 'Bowling Avg', value: '27.4' }
+          { label: 'Role', value: 'WK-Batter' },
+          { label: 'Strike Rate', value: '148.5' },
+          { label: 'Max Score', value: '128*' }
         ],
         status: 'upcoming'
       },
       {
-        id: 'lot_c6',
-        title: 'Heinrich Klaasen',
-        category: 'Wicket-Keeper Finisher',
-        description: 'Spin-demolishing destructive middle-order powerhouse.',
-        basePrice: 1.0,
+        id: 'lot_c9',
+        title: 'Travis Head',
+        category: 'Explosive Powerplay Opener',
+        description: 'Relentless powerplay destroyer who dismantled bowling attacks in 2024.',
+        imageUrl: '/players/travis_head.jpg',
+        basePrice: 1.5,
+        rating: 96,
+        stats: [
+          { label: 'Role', value: 'Left-Hand Opener' },
+          { label: 'Strike Rate', value: '191.5' },
+          { label: 'Powerplay SR', value: '210.0' }
+        ],
+        status: 'upcoming'
+      },
+      {
+        id: 'lot_c10',
+        title: 'Shubman Gill',
+        category: 'Prince of Indian Batting',
+        description: 'Technically flawless elegant opener and orange cap holder.',
+        imageUrl: '/players/shubman_gill.jpg',
+        basePrice: 2.0,
         rating: 95,
         stats: [
+          { label: 'Role', value: 'Right-Hand Opener' },
+          { label: 'Average', value: '47.8' },
+          { label: 'Centuries', value: '3' }
+        ],
+        status: 'upcoming'
+      },
+      {
+        id: 'lot_c11',
+        title: 'Mitchell Starc',
+        category: 'Left-Arm Express Pacer',
+        description: 'Record auction signing, searing yorkers and high-pressure clutch performer.',
+        imageUrl: '/players/mitchell_starc.jpg',
+        basePrice: 2.0,
+        rating: 96,
+        stats: [
+          { label: 'Role', value: 'Left-Arm Fast' },
+          { label: 'Speed', value: '148 km/h' },
+          { label: 'Playoff MoM', value: '2' }
+        ],
+        status: 'upcoming'
+      },
+      {
+        id: 'lot_c12',
+        title: 'Glenn Maxwell',
+        category: 'Big Show All-Rounder',
+        description: 'Unorthodox reverse-sweeping match-winner and handy off-spinner.',
+        imageUrl: '/players/glenn_maxwell.jpg',
+        basePrice: 1.5,
+        rating: 94,
+        stats: [
+          { label: 'Role', value: 'Batting All-Rounder' },
+          { label: 'Strike Rate', value: '157.0' },
+          { label: 'Sixes', value: '140+' }
+        ],
+        status: 'upcoming'
+      },
+      {
+        id: 'lot_c13',
+        title: 'KL Rahul',
+        category: 'Top-Order Anchor & Wicket-Keeper',
+        description: 'Consistent high-scoring anchor capable of accelerating at will.',
+        imageUrl: '/players/kl_rahul.jpg',
+        basePrice: 2.0,
+        rating: 94,
+        stats: [
           { label: 'Role', value: 'WK-Batter' },
-          { label: 'Strike Rate', value: '172.5' },
-          { label: 'Sixes/Inn', value: '3.1' }
+          { label: 'Average', value: '45.5' },
+          { label: 'Strike Rate', value: '135.0' }
         ],
         status: 'upcoming'
       }
@@ -121,6 +232,7 @@ export const SAMPLE_LOT_PACKS: LotPack[] = [
         title: 'Principal AI Researcher',
         category: 'AI & Machine Learning',
         description: 'Ex-DeepMind architect capable of fine-tuning multi-modal foundation models.',
+        imageUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&auto=format&fit=crop&q=80',
         basePrice: 120,
         rating: 98,
         stats: [
@@ -135,6 +247,7 @@ export const SAMPLE_LOT_PACKS: LotPack[] = [
         title: 'Staff Full-Stack Architect',
         category: 'Systems & Infrastructure',
         description: 'Zero-downtime distributed systems specialist who built sub-10ms real-time pipelines.',
+        imageUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=500&auto=format&fit=crop&q=80',
         basePrice: 100,
         rating: 96,
         stats: [
@@ -149,6 +262,7 @@ export const SAMPLE_LOT_PACKS: LotPack[] = [
         title: 'Head of Product Design',
         category: 'UI/UX & Creative',
         description: 'Award-winning design lead obsessed with fluid micro-interactions and dark mode aesthetic.',
+        imageUrl: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=500&auto=format&fit=crop&q=80',
         basePrice: 90,
         rating: 95,
         stats: [
@@ -163,6 +277,7 @@ export const SAMPLE_LOT_PACKS: LotPack[] = [
         title: 'Growth & Viral Marketer',
         category: 'Growth & Distribution',
         description: 'Acquisition wizard who engineered 0 to 1M users organically without paid ads.',
+        imageUrl: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=500&auto=format&fit=crop&q=80',
         basePrice: 80,
         rating: 93,
         stats: [
@@ -177,6 +292,7 @@ export const SAMPLE_LOT_PACKS: LotPack[] = [
         title: 'Senior Cybersecurity Ninja',
         category: 'Security & DevOps',
         description: 'White-hat hacker and zero-trust architect who hardens cloud perimeter.',
+        imageUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=500&auto=format&fit=crop&q=80',
         basePrice: 85,
         rating: 94,
         stats: [
@@ -202,6 +318,7 @@ export const SAMPLE_LOT_PACKS: LotPack[] = [
         title: 'Hyperion Titan Exo-Rig',
         category: 'Heavy Combat Rig',
         description: 'Tungsten-reinforced mechanized armor with plasma shield emitters.',
+        imageUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=500&auto=format&fit=crop&q=80',
         basePrice: 8000,
         rating: 97,
         stats: [
@@ -216,6 +333,7 @@ export const SAMPLE_LOT_PACKS: LotPack[] = [
         title: 'Quantum Warp Core V9',
         category: 'Propulsion Tech',
         description: 'Zero-point energy battery enabling instant sub-light interstellar travel.',
+        imageUrl: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=500&auto=format&fit=crop&q=80',
         basePrice: 12000,
         rating: 99,
         stats: [
@@ -230,6 +348,7 @@ export const SAMPLE_LOT_PACKS: LotPack[] = [
         title: 'Neural Deck Cyber-Implant',
         category: 'Cerebral AI',
         description: 'Direct optical cerebral interface boosting human analytical clock speed by 1000x.',
+        imageUrl: 'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=500&auto=format&fit=crop&q=80',
         basePrice: 6000,
         rating: 94,
         stats: [

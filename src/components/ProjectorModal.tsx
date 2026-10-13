@@ -203,13 +203,38 @@ export const ProjectorModal: FC<ProjectorModalProps> = ({
                 )}
               </div>
 
+              {/* Player Hero Spotlight Photo */}
+              <div className="flex justify-center mb-4">
+                <div className="relative">
+                  <div className="w-32 h-32 sm:w-44 sm:h-44 rounded-3xl overflow-hidden border-4 border-purple-500/50 shadow-[0_0_60px_rgba(168,85,247,0.4)] bg-[#141224] flex items-center justify-center">
+                    {currentLot.imageUrl ? (
+                      <img
+                        src={currentLot.imageUrl}
+                        alt={currentLot.title}
+                        className="w-full h-full object-cover object-top"
+                        onError={(e) => {
+                          (e.target as HTMLElement).style.display = 'none';
+                        }}
+                      />
+                    ) : (
+                      <span className="text-5xl">🏏</span>
+                    )}
+                  </div>
+                  {currentLot.rating && (
+                    <div className="absolute -bottom-2 -right-2 px-3 py-1 rounded-xl bg-purple-600 text-white text-xs font-mono font-black border border-purple-300 shadow-xl">
+                      ★ {currentLot.rating}
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {/* Title */}
-              <h2 className="text-4xl sm:text-6xl font-black font-title text-white tracking-tight leading-tight mb-2">
+              <h2 className="text-3xl sm:text-5xl font-black font-title text-white tracking-tight leading-tight mb-2">
                 {currentLot.title}
               </h2>
 
               {currentLot.description && (
-                <p className="text-sm text-zinc-400 max-w-lg mx-auto mb-6">
+                <p className="text-xs sm:text-sm text-zinc-300 max-w-lg mx-auto mb-5">
                   {currentLot.description}
                 </p>
               )}

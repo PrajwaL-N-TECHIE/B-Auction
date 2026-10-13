@@ -232,37 +232,64 @@ export const HostView: FC<HostViewProps> = ({ room, isLight = false }) => {
 
           {/* Lot Header & Live Price */}
           <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 pb-6 border-b border-purple-500/10">
-            <div>
-              <h3 className={`text-2xl sm:text-4xl font-black font-title tracking-tight ${
-                isLight ? 'text-slate-900' : 'text-white'
-              }`}>
-                {currentLot.title}
-              </h3>
-              {currentLot.description && (
-                <p className={`text-xs sm:text-sm mt-1 max-w-xl ${
-                  isLight ? 'text-slate-600' : 'text-zinc-400'
+            <div className="flex items-start sm:items-center gap-4 sm:gap-6">
+              {/* Player Photo Card */}
+              <div className="relative shrink-0">
+                <div className={`w-28 h-28 sm:w-36 sm:h-36 rounded-3xl overflow-hidden border-2 shadow-xl flex items-center justify-center ${
+                  isLight ? 'bg-slate-100 border-purple-200' : 'bg-[#141224] border-purple-500/40'
                 }`}>
-                  {currentLot.description}
-                </p>
-              )}
-
-              {/* Stats pills */}
-              {currentLot.stats && (
-                <div className="flex items-center gap-2 flex-wrap mt-3">
-                  {currentLot.stats.map((st, i) => (
-                    <span key={i} className={`text-xs font-mono px-2.5 py-1 rounded-lg border ${
-                      isLight ? 'bg-slate-100 border-slate-200 text-slate-700' : 'bg-white/5 border-white/10 text-zinc-300'
-                    }`}>
-                      <strong className="text-purple-600 dark:text-purple-300">{st.label}:</strong> {st.value}
-                    </span>
-                  ))}
-                  <span className={`text-xs font-mono px-2.5 py-1 rounded-lg border ${
-                    isLight ? 'bg-purple-50 border-purple-200 text-purple-700 font-bold' : 'bg-purple-950/40 border-purple-500/30 text-purple-300 font-bold'
-                  }`}>
-                    Base: {room.currencySymbol}{currentLot.basePrice.toFixed(2)} {room.unitLabel}
-                  </span>
+                  {currentLot.imageUrl ? (
+                    <img
+                      src={currentLot.imageUrl}
+                      alt={currentLot.title}
+                      className="w-full h-full object-cover object-top"
+                      onError={(e) => {
+                        (e.target as HTMLElement).style.display = 'none';
+                      }}
+                    />
+                  ) : (
+                    <div className="text-4xl">🏏</div>
+                  )}
                 </div>
-              )}
+                {currentLot.rating && (
+                  <div className="absolute -bottom-2 -right-2 px-2.5 py-0.5 rounded-xl bg-purple-600 text-white text-[11px] font-mono font-black border border-purple-400 shadow-md">
+                    ★ {currentLot.rating}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <h3 className={`text-2xl sm:text-4xl font-black font-title tracking-tight ${
+                  isLight ? 'text-slate-900' : 'text-white'
+                }`}>
+                  {currentLot.title}
+                </h3>
+                {currentLot.description && (
+                  <p className={`text-xs sm:text-sm mt-1 max-w-xl ${
+                    isLight ? 'text-slate-600' : 'text-zinc-400'
+                  }`}>
+                    {currentLot.description}
+                  </p>
+                )}
+
+                {/* Stats pills */}
+                {currentLot.stats && (
+                  <div className="flex items-center gap-2 flex-wrap mt-3">
+                    {currentLot.stats.map((st, i) => (
+                      <span key={i} className={`text-xs font-mono px-2.5 py-1 rounded-lg border ${
+                        isLight ? 'bg-slate-100 border-slate-200 text-slate-700' : 'bg-white/5 border-white/10 text-zinc-300'
+                      }`}>
+                        <strong className="text-purple-600 dark:text-purple-300">{st.label}:</strong> {st.value}
+                      </span>
+                    ))}
+                    <span className={`text-xs font-mono px-2.5 py-1 rounded-lg border ${
+                      isLight ? 'bg-purple-50 border-purple-200 text-purple-700 font-bold' : 'bg-purple-950/40 border-purple-500/30 text-purple-300 font-bold'
+                    }`}>
+                      Base: {room.currencySymbol}{currentLot.basePrice.toFixed(2)} {room.unitLabel}
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Current Price Ticker Box */}
@@ -530,7 +557,14 @@ export const HostView: FC<HostViewProps> = ({ room, isLight = false }) => {
                 idx === room.currentLotIndex ? (isLight ? 'bg-purple-50/80 font-bold' : 'bg-purple-950/40 font-bold') : ''
               }`}>
                 <div className="flex items-center gap-3">
-                  <span className="font-mono text-xs text-zinc-500">#{idx + 1}</span>
+                  <span className="font-mono text-xs text-zinc-500 w-6">#{idx + 1}</span>
+                  <div className="w-10 h-10 rounded-xl overflow-hidden border border-purple-500/30 bg-purple-950/20 shrink-0 flex items-center justify-center">
+                    {lot.imageUrl ? (
+                      <img src={lot.imageUrl} alt={lot.title} className="w-full h-full object-cover object-top" />
+                    ) : (
+                      <span className="text-base">🏏</span>
+                    )}
+                  </div>
                   <div>
                     <div className={`text-sm ${isLight ? 'text-slate-900' : 'text-white'}`}>{lot.title}</div>
                     <div className={`text-[11px] ${isLight ? 'text-slate-500' : 'text-zinc-400'}`}>{lot.category}</div>

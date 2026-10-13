@@ -186,22 +186,51 @@ export const PlayerView: FC<PlayerViewProps> = ({ room, participant, isLight = f
               ? isLight ? 'bg-purple-50 border-purple-400 shadow-purple-200/50' : 'bg-[#151229] border-purple-500/60 shadow-[0_0_40px_rgba(168,85,247,0.25)]'
               : isLight ? 'bg-white border-purple-200' : 'bg-[#0C0C14]/90 border-purple-500/30'
           }`}>
-            <div className="flex items-center justify-between mb-2">
-              <span className={`text-[10px] font-mono uppercase tracking-wider font-bold px-2.5 py-0.5 rounded-full border ${
-                isLight ? 'bg-purple-100 border-purple-200 text-purple-700' : 'bg-purple-500/20 border-purple-500/40 text-purple-300'
-              }`}>
-                {currentLot.category}
-              </span>
-              <span className={`text-[11px] font-mono ${isLight ? 'text-slate-500' : 'text-zinc-400'}`}>
-                Base: {room.currencySymbol}{currentLot.basePrice.toFixed(2)} {room.unitLabel}
-              </span>
-            </div>
+            <div className="flex items-center gap-3.5 mb-3">
+              {/* Player Headshot Photo */}
+              <div className="relative shrink-0">
+                <div className={`w-16 h-16 sm:w-20 sm:h-20 rounded-2xl overflow-hidden border-2 shadow-md flex items-center justify-center ${
+                  isLight ? 'bg-slate-100 border-purple-200' : 'bg-[#141224] border-purple-500/40'
+                }`}>
+                  {currentLot.imageUrl ? (
+                    <img
+                      src={currentLot.imageUrl}
+                      alt={currentLot.title}
+                      className="w-full h-full object-cover object-top"
+                      onError={(e) => {
+                        (e.target as HTMLElement).style.display = 'none';
+                      }}
+                    />
+                  ) : (
+                    <span className="text-2xl">🏏</span>
+                  )}
+                </div>
+                {currentLot.rating && (
+                  <div className="absolute -bottom-1 -right-1 px-1.5 py-0.2 rounded-md bg-purple-600 text-white text-[9px] font-mono font-black border border-purple-400 shadow">
+                    ★{currentLot.rating}
+                  </div>
+                )}
+              </div>
 
-            <h3 className={`text-xl sm:text-2xl font-black font-title tracking-tight ${
-              isLight ? 'text-slate-900' : 'text-white'
-            }`}>
-              {currentLot.title}
-            </h3>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-1 mb-1">
+                  <span className={`text-[10px] font-mono uppercase tracking-wider font-bold px-2 py-0.5 rounded-full border truncate ${
+                    isLight ? 'bg-purple-100 border-purple-200 text-purple-700' : 'bg-purple-500/20 border-purple-500/40 text-purple-300'
+                  }`}>
+                    {currentLot.category}
+                  </span>
+                  <span className={`text-[10px] font-mono shrink-0 ${isLight ? 'text-slate-500' : 'text-zinc-400'}`}>
+                    Base: {room.currencySymbol}{currentLot.basePrice.toFixed(2)} {room.unitLabel}
+                  </span>
+                </div>
+
+                <h3 className={`text-lg sm:text-xl font-black font-title tracking-tight truncate ${
+                  isLight ? 'text-slate-900' : 'text-white'
+                }`}>
+                  {currentLot.title}
+                </h3>
+              </div>
+            </div>
 
             {/* Current Price Ticker */}
             <div className="mt-4 p-4 rounded-2xl bg-[#141224]/80 border border-purple-500/30 text-center">
@@ -331,15 +360,24 @@ export const PlayerView: FC<PlayerViewProps> = ({ room, participant, isLight = f
 
               <div className="space-y-2">
                 {myParticipant.wonLots.map((lot, idx) => (
-                  <div key={lot.id || idx} className={`p-3 rounded-xl border flex items-center justify-between ${
+                  <div key={lot.id || idx} className={`p-3 rounded-xl border flex items-center justify-between gap-3 ${
                     isLight ? 'bg-slate-50 border-slate-200' : 'bg-white/5 border-white/10'
                   }`}>
-                    <div>
-                      <div className={`text-xs font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
-                        {lot.title}
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl overflow-hidden border border-purple-500/30 bg-purple-950/20 shrink-0 flex items-center justify-center">
+                        {lot.imageUrl ? (
+                          <img src={lot.imageUrl} alt={lot.title} className="w-full h-full object-cover object-top" />
+                        ) : (
+                          <span className="text-base">🏏</span>
+                        )}
                       </div>
-                      <div className={`text-[10px] ${isLight ? 'text-slate-500' : 'text-zinc-400'}`}>
-                        {lot.category}
+                      <div>
+                        <div className={`text-xs font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                          {lot.title}
+                        </div>
+                        <div className={`text-[10px] ${isLight ? 'text-slate-500' : 'text-zinc-400'}`}>
+                          {lot.category}
+                        </div>
                       </div>
                     </div>
                     <div className="text-right">

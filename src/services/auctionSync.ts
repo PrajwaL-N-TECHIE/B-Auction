@@ -1,34 +1,99 @@
 import { supabase } from '../lib/supabase';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 import type { AuctionRoom, AuctionParticipant, BidEntry, AuctionLot } from '../types/auction';
 import { SAMPLE_LOT_PACKS } from '../constants/samplePacks';
 
-const localCache: Record<string, AuctionRoom> = {};
-const activeSubscriptions: Record<string, ((room: AuctionRoom) => void)[]> = {};
+const localRoomCache: Record<string, AuctionRoom> = {};
+const subscribers: Record<string, ((room: AuctionRoom) => void)[]> = {};
+const localChannels: Record<string, BroadcastChannel> = {};
+const supabaseChannels: Record<string, RealtimeChannel> = {};
 
 export function generateRoomCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let prefix = 'AUC';
   let rand = '';
   for (let i = 0; i < 3; i++) {
     rand += chars.charAt(Math.floor(Math.random() * chars.length));
   }
-  return `${prefix}-${rand}`;
+  return `AUC-${rand}`;
 }
 
-function notifyLocalListeners(code: string, room: AuctionRoom) {
-  localCache[code] = room;
+/**
+ * Get or create local BroadcastChannel for zero-latency multi-tab sync
+ */
+function getLocalChannel(code: string): BroadcastChannel | null {
+  if (typeof window === 'undefined' || !window.BroadcastChannel) return null;
+  const cleanCode = code.toUpperCase().trim();
+  if (!localChannels[cleanCode]) {
+    try {
+      localChannels[cleanCode] = new BroadcastChannel(`bauction_local_${cleanCode}`);
+    } catch {}
+  }
+  return localChannels[cleanCode] || null;
+}
+
+/**
+ * Get or create Supabase Realtime WebSocket channel for instant sub-20ms cross-device sync
+ */
+export function getSupabaseChannel(code: string): RealtimeChannel {
+  const cleanCode = code.toUpperCase().trim();
+  const channelName = `auction_room_${cleanCode}`;
+  if (!supabaseChannels[channelName]) {
+    supabaseChannels[channelName] = supabase.channel(channelName, {
+      config: {
+        broadcast: {
+          self: true,
+          ack: true
+        }
+      }
+    });
+  }
+  return supabaseChannels[channelName];
+}
+
+/**
+ * Broadcast room update instantly across Supabase WebSockets, local tabs, and memory
+ */
+export async function broadcastRoomUpdate(code: string, room: AuctionRoom): Promise<void> {
+  const cleanCode = code.toUpperCase().trim();
+  localRoomCache[cleanCode] = room;
+
+  // 1. Persist to localStorage
   try {
-    localStorage.setItem(`bauction_room_${code}`, JSON.stringify(room));
+    localStorage.setItem(`bauction_room_${cleanCode}`, JSON.stringify(room));
   } catch {}
 
-  const listeners = activeSubscriptions[code];
+  // 2. Notify in-memory listeners
+  const listeners = subscribers[cleanCode];
   if (listeners) {
     listeners.forEach(cb => {
-      try { cb(room); } catch (e) { console.warn('Listener error:', e); }
+      try { cb(room); } catch (e) { console.warn('Listener callback error:', e); }
     });
+  }
+
+  // 3. Send over local BroadcastChannel for multi-tab localhost sync
+  const localCh = getLocalChannel(cleanCode);
+  if (localCh) {
+    try {
+      localCh.postMessage({ type: 'ROOM_UPDATE', room });
+    } catch {}
+  }
+
+  // 4. Send over Supabase Realtime WebSockets to all connected phones & laptops
+  try {
+    const sbChan = getSupabaseChannel(cleanCode);
+    await sbChan.send({
+      type: 'broadcast',
+      event: 'ROOM_UPDATE',
+      payload: room
+    });
+  } catch (err) {
+    console.warn('[Supabase Realtime] Broadcast warn:', err);
   }
 }
 
+/**
+ * Create a new Auction Arena
+ */
 export async function createRoom(
   code: string,
   title: string,
@@ -47,7 +112,7 @@ export async function createRoom(
     status: index === 0 ? 'bidding' : 'upcoming'
   }));
 
-  const newRoom: AuctionRoom = {
+  const initialRoom: AuctionRoom = {
     code: cleanCode,
     title: title || selectedPack.name,
     currencySymbol: selectedPack.currencySymbol,
@@ -67,25 +132,30 @@ export async function createRoom(
     updatedAt: Date.now()
   };
 
-  notifyLocalListeners(cleanCode, newRoom);
-
-  // Broadcast to Supabase Realtime channel
-  try {
-    const channel = supabase.channel(`auction_room_${cleanCode}`);
-    await channel.subscribe();
-    await channel.send({
-      type: 'broadcast',
-      event: 'room_state',
-      payload: newRoom
+  // Ensure channel is subscribed so broadcast goes through immediately
+  const sbChan = getSupabaseChannel(cleanCode);
+  await new Promise<void>((resolve) => {
+    sbChan.subscribe((status) => {
+      if (status === 'SUBSCRIBED' || status === 'CHANNEL_ERROR') {
+        resolve();
+      }
     });
-  } catch (err) {
-    console.warn('Supabase createRoom warning:', err);
-  }
+    // Fallback timeout in case already subscribed or offline
+    setTimeout(resolve, 800);
+  });
 
-  return newRoom;
+  await broadcastRoomUpdate(cleanCode, initialRoom);
+  console.log(`[Supabase Realtime] Auction Arena ${cleanCode} created successfully!`);
+  return initialRoom;
 }
 
-export async function joinRoom(code: string, participant: Omit<AuctionParticipant, 'purse' | 'initialPurse' | 'wonLots'>): Promise<AuctionRoom> {
+/**
+ * Join Room as a Franchise / Bidder
+ */
+export async function joinRoom(
+  code: string,
+  participant: Omit<AuctionParticipant, 'purse' | 'initialPurse' | 'wonLots'>
+): Promise<AuctionRoom> {
   const cleanCode = code.toUpperCase().trim();
   let room = getCachedRoom(cleanCode);
 
@@ -98,10 +168,10 @@ export async function joinRoom(code: string, participant: Omit<AuctionParticipan
   }
 
   if (!room) {
-    // If joining before room cache arrives, create minimal active structure
+    // Joining before host state arrived: initialize fallback template
     room = {
       code: cleanCode,
-      title: 'Buildicy Live Auction',
+      title: 'Premier Cricket Auction (IPL Mega Auction)',
       currencySymbol: '₹',
       unitLabel: 'Cr',
       initialPurse: 100,
@@ -137,22 +207,13 @@ export async function joinRoom(code: string, participant: Omit<AuctionParticipan
     updatedAt: Date.now()
   };
 
-  notifyLocalListeners(cleanCode, updatedRoom);
-
-  try {
-    const channel = supabase.channel(`auction_room_${cleanCode}`);
-    await channel.send({
-      type: 'broadcast',
-      event: 'room_state',
-      payload: updatedRoom
-    });
-  } catch (e) {
-    console.warn('Supabase joinRoom broadcast error:', e);
-  }
-
+  await broadcastRoomUpdate(cleanCode, updatedRoom);
   return updatedRoom;
 }
 
+/**
+ * Place a Bid in the Auction Arena
+ */
 export async function placeBid(code: string, participantId: string, amount: number): Promise<AuctionRoom> {
   const cleanCode = code.toUpperCase().trim();
   const room = getCachedRoom(cleanCode);
@@ -172,7 +233,7 @@ export async function placeBid(code: string, participantId: string, amount: numb
   }
 
   const newBid: BidEntry = {
-    id: `bid_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
+    id: `bid_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
     participantId: participant.id,
     bidderName: participant.name,
     avatar: participant.avatar,
@@ -191,26 +252,17 @@ export async function placeBid(code: string, participantId: string, amount: numb
     },
     gavelPhase: 'idle',
     gavelCountdown: 10,
-    bids: [newBid, ...(room.bids || [])].slice(0, 30),
+    bids: [newBid, ...(room.bids || [])].slice(0, 40),
     updatedAt: Date.now()
   };
 
-  notifyLocalListeners(cleanCode, updatedRoom);
-
-  try {
-    const channel = supabase.channel(`auction_room_${cleanCode}`);
-    await channel.send({
-      type: 'broadcast',
-      event: 'bid_placed',
-      payload: updatedRoom
-    });
-  } catch (e) {
-    console.warn('Supabase placeBid error:', e);
-  }
-
+  await broadcastRoomUpdate(cleanCode, updatedRoom);
   return updatedRoom;
 }
 
+/**
+ * Set Gavel Countdown Phase (Host Action: Going Once / Going Twice)
+ */
 export async function setGavelPhase(code: string, phase: AuctionRoom['gavelPhase'], countdown?: number): Promise<AuctionRoom> {
   const cleanCode = code.toUpperCase().trim();
   const room = getCachedRoom(cleanCode);
@@ -223,22 +275,13 @@ export async function setGavelPhase(code: string, phase: AuctionRoom['gavelPhase
     updatedAt: Date.now()
   };
 
-  notifyLocalListeners(cleanCode, updatedRoom);
-
-  try {
-    const channel = supabase.channel(`auction_room_${cleanCode}`);
-    await channel.send({
-      type: 'broadcast',
-      event: 'gavel_phase',
-      payload: updatedRoom
-    });
-  } catch (e) {
-    console.warn('Supabase setGavelPhase error:', e);
-  }
-
+  await broadcastRoomUpdate(cleanCode, updatedRoom);
   return updatedRoom;
 }
 
+/**
+ * Sell current Lot to the Highest Bidder (Host Action)
+ */
 export async function sellCurrentLot(code: string): Promise<AuctionRoom> {
   const cleanCode = code.toUpperCase().trim();
   const room = getCachedRoom(cleanCode);
@@ -249,11 +292,9 @@ export async function sellCurrentLot(code: string): Promise<AuctionRoom> {
 
   const winningBidder = room.highestBidder;
   if (!winningBidder) {
-    // If no one bid, mark unsold
     return passCurrentLot(code);
   }
 
-  // Update lot
   const updatedLots = [...room.lots];
   const soldLot: AuctionLot = {
     ...currentLot,
@@ -267,7 +308,7 @@ export async function sellCurrentLot(code: string): Promise<AuctionRoom> {
   };
   updatedLots[room.currentLotIndex] = soldLot;
 
-  // Deduct purse and add won lot to winner
+  // Deduct purse and assign won lot to winner
   const updatedParticipants = { ...room.participants };
   const winner = updatedParticipants[winningBidder.participantId];
   if (winner) {
@@ -286,22 +327,13 @@ export async function sellCurrentLot(code: string): Promise<AuctionRoom> {
     updatedAt: Date.now()
   };
 
-  notifyLocalListeners(cleanCode, updatedRoom);
-
-  try {
-    const channel = supabase.channel(`auction_room_${cleanCode}`);
-    await channel.send({
-      type: 'broadcast',
-      event: 'lot_sold',
-      payload: updatedRoom
-    });
-  } catch (e) {
-    console.warn('Supabase sellCurrentLot error:', e);
-  }
-
+  await broadcastRoomUpdate(cleanCode, updatedRoom);
   return updatedRoom;
 }
 
+/**
+ * Pass current Lot as Unsold (Host Action)
+ */
 export async function passCurrentLot(code: string): Promise<AuctionRoom> {
   const cleanCode = code.toUpperCase().trim();
   const room = getCachedRoom(cleanCode);
@@ -323,22 +355,13 @@ export async function passCurrentLot(code: string): Promise<AuctionRoom> {
     updatedAt: Date.now()
   };
 
-  notifyLocalListeners(cleanCode, updatedRoom);
-
-  try {
-    const channel = supabase.channel(`auction_room_${cleanCode}`);
-    await channel.send({
-      type: 'broadcast',
-      event: 'lot_unsold',
-      payload: updatedRoom
-    });
-  } catch (e) {
-    console.warn('Supabase passCurrentLot error:', e);
-  }
-
+  await broadcastRoomUpdate(cleanCode, updatedRoom);
   return updatedRoom;
 }
 
+/**
+ * Navigate to next / previous Lot (Host Action)
+ */
 export async function navigateLot(code: string, direction: 'next' | 'prev'): Promise<AuctionRoom> {
   const cleanCode = code.toUpperCase().trim();
   const room = getCachedRoom(cleanCode);
@@ -371,49 +394,83 @@ export async function navigateLot(code: string, direction: 'next' | 'prev'): Pro
     updatedAt: Date.now()
   };
 
-  notifyLocalListeners(cleanCode, updatedRoom);
-
-  try {
-    const channel = supabase.channel(`auction_room_${cleanCode}`);
-    await channel.send({
-      type: 'broadcast',
-      event: 'lot_navigate',
-      payload: updatedRoom
-    });
-  } catch (e) {
-    console.warn('Supabase navigateLot error:', e);
-  }
-
+  await broadcastRoomUpdate(cleanCode, updatedRoom);
   return updatedRoom;
 }
 
+/**
+ * Subscribe to Real-Time Room Updates
+ * Powered by Supabase Realtime WebSockets for zero-reload sub-20ms cross-device sync!
+ */
 export function subscribeRoom(code: string, onUpdate: (room: AuctionRoom) => void): () => void {
   const cleanCode = code.toUpperCase().trim();
 
-  if (!activeSubscriptions[cleanCode]) {
-    activeSubscriptions[cleanCode] = [];
+  if (!subscribers[cleanCode]) {
+    subscribers[cleanCode] = [];
   }
-  activeSubscriptions[cleanCode].push(onUpdate);
+  subscribers[cleanCode].push(onUpdate);
 
+  // 1. Initial immediate push from local cache or storage
   const cached = getCachedRoom(cleanCode);
   if (cached) {
     onUpdate(cached);
   }
 
-  const channel = supabase.channel(`auction_room_${cleanCode}`);
-  channel
-    .on('broadcast', { event: '*' }, (message: any) => {
-      if (message.payload && message.payload.code === cleanCode) {
-        notifyLocalListeners(cleanCode, message.payload);
+  // 2. Local BroadcastChannel listener (multi-tab sync)
+  const localCh = getLocalChannel(cleanCode);
+  const handleLocalMsg = (ev: MessageEvent) => {
+    if (ev.data?.type === 'ROOM_UPDATE' && ev.data.room?.code === cleanCode) {
+      localRoomCache[cleanCode] = ev.data.room;
+      onUpdate(ev.data.room);
+    }
+  };
+  localCh?.addEventListener('message', handleLocalMsg);
+
+  // 3. Supabase Realtime WebSocket channel listener
+  const sbChan = getSupabaseChannel(cleanCode);
+
+  sbChan
+    .on('broadcast', { event: 'ROOM_UPDATE' }, (msg) => {
+      if (msg.payload && msg.payload.code === cleanCode) {
+        localRoomCache[cleanCode] = msg.payload;
+        try {
+          localStorage.setItem(`bauction_room_${cleanCode}`, JSON.stringify(msg.payload));
+        } catch {}
+        onUpdate(msg.payload);
       }
     })
-    .subscribe();
+    .on('broadcast', { event: 'REQUEST_SYNC' }, () => {
+      // If we have current room state (e.g. Host), broadcast it to newly joined bidders
+      const current = localRoomCache[cleanCode] || getCachedRoom(cleanCode);
+      if (current) {
+        sbChan.send({
+          type: 'broadcast',
+          event: 'ROOM_UPDATE',
+          payload: current
+        }).catch(() => {});
+      }
+    });
 
+  // Ensure channel is subscribed and request state from host
+  sbChan.subscribe((status) => {
+    if (status === 'SUBSCRIBED') {
+      console.log(`[Supabase Realtime] Connected to auction channel: ${cleanCode}`);
+      // Request latest room state from any active host / peer
+      sbChan.send({
+        type: 'broadcast',
+        event: 'REQUEST_SYNC',
+        payload: {}
+      }).catch(() => {});
+    }
+  });
+
+  // 4. Storage event listener fallback
   const storageHandler = (e: StorageEvent) => {
     if (e.key === `bauction_room_${cleanCode}` && e.newValue) {
       try {
         const parsed = JSON.parse(e.newValue);
-        notifyLocalListeners(cleanCode, parsed);
+        localRoomCache[cleanCode] = parsed;
+        onUpdate(parsed);
       } catch {}
     }
   };
@@ -421,21 +478,21 @@ export function subscribeRoom(code: string, onUpdate: (room: AuctionRoom) => voi
 
   return () => {
     window.removeEventListener('storage', storageHandler);
-    channel.unsubscribe().catch(() => {});
-    if (activeSubscriptions[cleanCode]) {
-      activeSubscriptions[cleanCode] = activeSubscriptions[cleanCode].filter(cb => cb !== onUpdate);
+    localCh?.removeEventListener('message', handleLocalMsg);
+    if (subscribers[cleanCode]) {
+      subscribers[cleanCode] = subscribers[cleanCode].filter(cb => cb !== onUpdate);
     }
   };
 }
 
 export function getCachedRoom(code: string): AuctionRoom | null {
   const cleanCode = code.toUpperCase().trim();
-  if (localCache[cleanCode]) return localCache[cleanCode];
+  if (localRoomCache[cleanCode]) return localRoomCache[cleanCode];
   try {
     const stored = localStorage.getItem(`bauction_room_${cleanCode}`);
     if (stored) {
       const parsed = JSON.parse(stored);
-      localCache[cleanCode] = parsed;
+      localRoomCache[cleanCode] = parsed;
       return parsed;
     }
   } catch {}

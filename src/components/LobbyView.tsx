@@ -3,6 +3,7 @@ import { ArrowRight, Sparkles, Gavel, Shield, Dices, Plus } from 'lucide-react';
 import { generateRoomCode, createRoom, joinRoom } from '../services/auctionSync';
 import type { AuctionParticipant } from '../types/auction';
 import { BUIZ_AVATAR_PRESETS, getRandomAvatar, DEFAULT_AVATAR } from '../constants/avatars';
+import { IPL_TEAMS, getIPLTeamByLogo } from '../constants/iplTeams';
 import { SAMPLE_LOT_PACKS } from '../constants/samplePacks';
 
 interface LobbyViewProps {
@@ -240,13 +241,13 @@ export const LobbyView: FC<LobbyViewProps> = ({
             />
           </div>
 
-          {/* Character Avatar Selector */}
+          {/* IPL Franchise / Team Avatar Selector */}
           <div>
             <div className="flex items-center justify-between mb-2">
               <label className={`text-xs font-mono font-bold uppercase tracking-wider ${
                 isLight ? 'text-purple-700' : 'text-purple-300'
               }`}>
-                Team Avatar:
+                Choose IPL Franchise:
               </label>
               <button
                 type="button"
@@ -258,45 +259,83 @@ export const LobbyView: FC<LobbyViewProps> = ({
               </button>
             </div>
 
-            {/* Selected Avatar Preview */}
-            <div className="flex items-center justify-center mb-3">
-              <div className={`relative p-2 rounded-2xl border-2 flex items-center justify-center shadow-md ${
-                isLight ? 'bg-purple-50 border-purple-300' : 'bg-purple-950/40 border-purple-500'
-              }`}>
-                <div className="w-16 h-16 rounded-xl overflow-hidden flex items-center justify-center">
-                  <img
-                    src={selectedAvatar}
-                    alt="Team Avatar"
-                    className="w-full h-full object-contain"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Avatar Preset Grid */}
-            <div className="grid grid-cols-6 gap-2">
-              {BUIZ_AVATAR_PRESETS.map((preset) => (
-                <button
-                  key={preset.id}
-                  type="button"
-                  onClick={() => setSelectedAvatar(preset.url)}
-                  className={`h-11 rounded-xl p-1 flex items-center justify-center transition-all cursor-pointer ${
-                    selectedAvatar === preset.url
-                      ? 'bg-purple-600/30 border-2 border-purple-500 scale-110 shadow-md'
-                      : isLight
-                      ? 'bg-slate-100 hover:bg-slate-200 border border-slate-200 opacity-80 hover:opacity-100'
-                      : 'bg-white/5 hover:bg-white/10 border border-white/10 opacity-70 hover:opacity-100'
-                  }`}
-                  title={preset.name}
+            {/* Selected IPL Team Highlight Banner */}
+            {(() => {
+              const currentTeam = getIPLTeamByLogo(selectedAvatar) || IPL_TEAMS[0];
+              return (
+                <div
+                  className="mb-3 p-3 rounded-2xl border flex items-center gap-3 transition-all shadow-md"
+                  style={{
+                    backgroundColor: isLight ? '#faf5ff' : 'rgba(24, 18, 43, 0.9)',
+                    borderColor: currentTeam.primaryColor
+                  }}
                 >
-                  <img
-                    src={preset.url}
-                    alt={preset.name}
-                    className="w-full h-full object-contain pointer-events-none"
-                    loading="lazy"
-                  />
-                </button>
-              ))}
+                  <div className="w-14 h-14 p-1.5 rounded-xl bg-white shadow-sm border border-purple-100 flex items-center justify-center shrink-0">
+                    <img
+                      src={currentTeam.logo}
+                      alt={currentTeam.name}
+                      className="w-full h-full object-contain"
+                    />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-black font-title truncate text-slate-900 dark:text-white">
+                        {currentTeam.name}
+                      </span>
+                      <span
+                        className="text-[10px] font-black font-mono px-1.5 py-0.5 rounded text-white shrink-0"
+                        style={{ backgroundColor: currentTeam.primaryColor }}
+                      >
+                        {currentTeam.shortName}
+                      </span>
+                    </div>
+                    <p className="text-[11px] font-mono text-purple-600 dark:text-purple-300 truncate mt-0.5">
+                      {currentTeam.tagline}
+                    </p>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* 10 IPL Teams Grid */}
+            <div className="grid grid-cols-5 gap-2">
+              {IPL_TEAMS.map((team) => {
+                const isSelected = selectedAvatar === team.logo || selectedAvatar.includes(team.shortName.toLowerCase());
+                return (
+                  <button
+                    key={team.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedAvatar(team.logo);
+                      setTeamName(team.name);
+                    }}
+                    className={`h-16 rounded-2xl p-1.5 flex flex-col items-center justify-center gap-1 transition-all cursor-pointer relative group ${
+                      isSelected
+                        ? 'border-2 scale-105 shadow-lg'
+                        : isLight
+                        ? 'bg-slate-100/80 hover:bg-white border border-slate-200 opacity-80 hover:opacity-100 hover:shadow-sm'
+                        : 'bg-white/5 hover:bg-white/10 border border-white/10 opacity-75 hover:opacity-100'
+                    }`}
+                    style={isSelected ? {
+                      borderColor: team.primaryColor,
+                      backgroundColor: isLight ? '#ffffff' : 'rgba(255, 255, 255, 0.1)'
+                    } : undefined}
+                    title={`${team.name} (${team.shortName})`}
+                  >
+                    <div className="w-8 h-8 flex items-center justify-center">
+                      <img
+                        src={team.logo}
+                        alt={team.shortName}
+                        className="w-full h-full object-contain pointer-events-none drop-shadow-sm"
+                        loading="lazy"
+                      />
+                    </div>
+                    <span className="text-[10px] font-mono font-black tracking-tight" style={{ color: team.primaryColor }}>
+                      {team.shortName}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
