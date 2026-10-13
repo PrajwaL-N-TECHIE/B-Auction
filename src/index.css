@@ -1,0 +1,133 @@
+@import "tailwindcss";
+
+:root {
+  --font-main: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-title: 'Syne', system-ui, sans-serif;
+  --font-mono: 'DM Mono', monospace;
+
+  /* Theme tokens - Dark default */
+  --bg-primary: #050507;
+  --bg-surface: #0A0A10;
+  --bg-surface-2: #111119;
+  --bg-surface-3: #141224;
+  --border-subtle: rgba(168, 85, 247, 0.15);
+  --border-card: rgba(168, 85, 247, 0.25);
+  --text-primary: #ffffff;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --purple-brand: #7c3aed;
+  --purple-glow: #a855f7;
+  --shadow-card: 0 10px 30px -10px rgba(0, 0, 0, 0.6);
+}
+
+/* Light Theme Variables */
+html.light,
+body.light,
+.light {
+  --bg-primary: #f8fafc;
+  --bg-surface: #ffffff;
+  --bg-surface-2: #f1f5f9;
+  --bg-surface-3: #f5f3ff;
+  --border-subtle: #e2e8f0;
+  --border-card: #cbd5e1;
+  --text-primary: #0f172a;
+  --text-secondary: #334155;
+  --text-muted: #64748b;
+  --purple-brand: #7c3aed;
+  --purple-glow: #9333ea;
+  --shadow-card: 0 10px 30px -10px rgba(15, 23, 42, 0.08);
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+  
+  html, body {
+    margin: 0;
+    padding: 0;
+    font-family: var(--font-main);
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    min-height: 100vh;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    transition: background-color 0.2s ease, color 0.2s ease;
+  }
+
+  h1, h2, h3, h4, .font-title {
+    font-family: var(--font-title);
+  }
+
+  code, pre, .font-mono {
+    font-family: var(--font-mono);
+  }
+}
+
+/* Dynamic Bidding Aura & Gavel Animations */
+@keyframes bidPulse {
+  0% {
+    transform: scale(0.98);
+    opacity: 0.7;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.98);
+    opacity: 0.7;
+  }
+}
+
+@keyframes goldGlow {
+  0% {
+    box-shadow: 0 0 15px rgba(250, 204, 21, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 40px rgba(250, 204, 21, 0.7);
+  }
+  100% {
+    box-shadow: 0 0 15px rgba(250, 204, 21, 0.3);
+  }
+}
+
+@keyframes gavelStrike {
+  0% { transform: rotate(0deg); }
+  35% { transform: rotate(-35deg); }
+  60% { transform: rotate(25deg); }
+  80% { transform: rotate(-10deg); }
+  100% { transform: rotate(0deg); }
+}
+
+.bid-pulse-ring {
+  animation: bidPulse 2s ease-in-out infinite;
+}
+
+.gold-glow-card {
+  animation: goldGlow 2.4s ease-in-out infinite;
+}
+
+.gavel-strike-anim {
+  animation: gavelStrike 0.6s cubic-bezier(0.17, 0.89, 0.32, 1.28);
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(168, 85, 247, 0.3);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(168, 85, 247, 0.6);
+}
