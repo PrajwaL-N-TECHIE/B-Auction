@@ -1,9 +1,9 @@
 import { useState, useEffect, type FC } from 'react';
 import { ArrowRight, Sparkles, Gavel, Shield, Dices, Plus } from 'lucide-react';
-import { generateRoomCode, createRoom, joinRoom } from '../services/auctionSync';
-import type { AuctionParticipant } from '../types/auction';
+import { generateRoomCode, createRoom, joinRoom, subscribeRoom, getCachedRoom } from '../services/auctionSync';
+import type { AuctionParticipant, AuctionRoom } from '../types/auction';
 import { BUIZ_AVATAR_PRESETS, getRandomAvatar, DEFAULT_AVATAR } from '../constants/avatars';
-import { IPL_TEAMS, getIPLTeamByLogo } from '../constants/iplTeams';
+import { IPL_TEAMS, getIPLTeamByLogo, type IPLTeam } from '../constants/iplTeams';
 import { SAMPLE_LOT_PACKS } from '../constants/samplePacks';
 
 interface LobbyViewProps {
@@ -34,6 +34,56 @@ export const LobbyView: FC<LobbyViewProps> = ({
   const [selectedAvatar, setSelectedAvatar] = useState(DEFAULT_AVATAR);
   const [joining, setJoining] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [activeRoom, setActiveRoom] = useState<AuctionRoom | null>(null);
+
+  // Live room state subscription for instant duplicate team detection
+  useEffect(() => {
+    const clean = joinCode.toUpperCase().trim();
+    if (clean.length >= 6) {
+      const cached = getCachedRoom(clean);
+      if (cached) setActiveRoom(cached);
+
+      const unsub = subscribeRoom(clean, (roomUpdate) => {
+        setActiveRoom(roomUpdate);
+      });
+      return () => unsub();
+    } else {
+      setActiveRoom(null);
+    }
+  }, [joinCode]);
+
+  // Check taken teams in current room
+  const cleanCode = joinCode.toUpperCase().trim();
+  const takenParticipants = Object.values(activeRoom?.participants || {});
+
+  const getTakenInfo = (team: IPLTeam) => {
+    return takenParticipants.find((p) => {
+      const pLogo = (p.avatar || '').split('?')[0].toLowerCase();
+      const tLogo = team.logo.split('?')[0].toLowerCase();
+      return pLogo === tLogo || pLogo.includes(team.shortName.toLowerCase());
+    });
+  };
+
+  // If currently selected avatar is taken by another bidder, switch to first available
+  useEffect(() => {
+    if (!activeRoom || takenParticipants.length === 0) return;
+    const clean = joinCode.toUpperCase().trim();
+    const myPid = clean ? localStorage.getItem(`bauction_pid_${clean}`) : null;
+    const currentTeam = getIPLTeamByLogo(selectedAvatar);
+    if (currentTeam) {
+      const taken = getTakenInfo(currentTeam);
+      if (taken && taken.id !== myPid) {
+        const firstAvailable = IPL_TEAMS.find((t) => {
+          const tInfo = getTakenInfo(t);
+          return !tInfo || tInfo.id === myPid;
+        });
+        if (firstAvailable) {
+          setSelectedAvatar(firstAvailable.logo);
+          setTeamName(firstAvailable.name);
+        }
+      }
+    }
+  }, [activeRoom?.code, takenParticipants.length, joinCode]);
 
   // Update joinCode if initialRoomCode changes
   useEffect(() => {
@@ -54,7 +104,19 @@ export const LobbyView: FC<LobbyViewProps> = ({
   }, []);
 
   const handleRollAvatar = () => {
-    setSelectedAvatar(getRandomAvatar());
+    const clean = joinCode.toUpperCase().trim();
+    const myPid = clean ? localStorage.getItem(`bauction_pid_${clean}`) : null;
+    const available = IPL_TEAMS.filter((t) => {
+      const taken = getTakenInfo(t);
+      return !taken || taken.id === myPid;
+    });
+    if (available.length > 0) {
+      const randomTeam = available[Math.floor(Math.random() * available.length)];
+      setSelectedAvatar(randomTeam.logo);
+      setTeamName(randomTeam.name);
+    } else {
+      setSelectedAvatar(getRandomAvatar());
+    }
   };
 
   const handlePackChange = (packId: string) => {
@@ -98,10 +160,47 @@ export const LobbyView: FC<LobbyViewProps> = ({
 
     setJoining(true);
     try {
+      // Re-use saved participant ID for this room so page refresh does not trigger duplicate error
+      const storagePidKey = `bauction_pid_${cleanCode}`;
+      let participantId = localStorage.getItem(storagePidKey);
+      if (!participantId) {
+        participantId = `tm_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+        localStorage.setItem(storagePidKey, participantId);
+      }
+
+      // Pre-flight duplicate check against live room state
+      if (activeRoom) {
+        const otherParticipants = Object.values(activeRoom.participants || {}).filter(
+          (p) => p.id !== participantId
+        );
+
+        // 1. Check duplicate team name
+        const duplicateName = otherParticipants.find(
+          (p) => p.name.trim().toLowerCase() === cleanName.toLowerCase()
+        );
+        if (duplicateName) {
+          setErrorMsg(`The team name "${cleanName}" is already registered in this arena. Duplicate team names are not allowed!`);
+          setJoining(false);
+          return;
+        }
+
+        // 2. Check duplicate IPL franchise logo
+        const duplicateAvatar = otherParticipants.find((p) => {
+          if (!p.avatar) return false;
+          const pLogo = p.avatar.split('?')[0].toLowerCase();
+          const chosenLogo = selectedAvatar.split('?')[0].toLowerCase();
+          return pLogo === chosenLogo;
+        });
+        if (duplicateAvatar) {
+          setErrorMsg(`This IPL franchise has already been chosen by "${duplicateAvatar.name}". Duplicate franchise entries are strictly not allowed!`);
+          setJoining(false);
+          return;
+        }
+      }
+
       localStorage.setItem('bauction_team_name', cleanName);
       localStorage.setItem('bauction_team_avatar', selectedAvatar);
 
-      const participantId = `tm_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
       const newParticipant: Omit<AuctionParticipant, 'purse' | 'initialPurse' | 'wonLots'> = {
         id: participantId,
         name: cleanName,
@@ -300,28 +399,53 @@ export const LobbyView: FC<LobbyViewProps> = ({
             {/* 10 IPL Teams Grid */}
             <div className="grid grid-cols-5 gap-2">
               {IPL_TEAMS.map((team) => {
+                const clean = joinCode.toUpperCase().trim();
+                const myPid = clean ? localStorage.getItem(`bauction_pid_${clean}`) : null;
+                const takenInfo = getTakenInfo(team);
+                const isTakenByOther = Boolean(takenInfo && takenInfo.id !== myPid);
+                const isMyTeam = Boolean(takenInfo && takenInfo.id === myPid);
                 const isSelected = selectedAvatar === team.logo || selectedAvatar.includes(team.shortName.toLowerCase());
+
                 return (
                   <button
                     key={team.id}
                     type="button"
+                    disabled={isTakenByOther}
                     onClick={() => {
+                      if (isTakenByOther) return;
                       setSelectedAvatar(team.logo);
                       setTeamName(team.name);
+                      setErrorMsg('');
                     }}
-                    className={`h-16 rounded-2xl p-1.5 flex flex-col items-center justify-center gap-1 transition-all cursor-pointer relative group ${
-                      isSelected
-                        ? 'border-2 scale-105 shadow-lg'
+                    className={`h-16 rounded-2xl p-1.5 flex flex-col items-center justify-center gap-1 transition-all relative group ${
+                      isTakenByOther
+                        ? 'opacity-35 cursor-not-allowed bg-rose-950/20 border border-rose-500/20 grayscale'
+                        : isSelected
+                        ? 'border-2 scale-105 shadow-lg cursor-pointer'
                         : isLight
-                        ? 'bg-slate-100/80 hover:bg-white border border-slate-200 opacity-80 hover:opacity-100 hover:shadow-sm'
-                        : 'bg-white/5 hover:bg-white/10 border border-white/10 opacity-75 hover:opacity-100'
+                        ? 'bg-slate-100/80 hover:bg-white border border-slate-200 opacity-80 hover:opacity-100 hover:shadow-sm cursor-pointer'
+                        : 'bg-white/5 hover:bg-white/10 border border-white/10 opacity-75 hover:opacity-100 cursor-pointer'
                     }`}
-                    style={isSelected ? {
+                    style={isSelected && !isTakenByOther ? {
                       borderColor: team.primaryColor,
                       backgroundColor: isLight ? '#ffffff' : 'rgba(255, 255, 255, 0.1)'
                     } : undefined}
-                    title={`${team.name} (${team.shortName})`}
+                    title={
+                      isTakenByOther
+                        ? `Claimed by ${takenInfo?.name || 'another team'} - Duplicate entries not allowed`
+                        : `${team.name} (${team.shortName})`
+                    }
                   >
+                    {isTakenByOther && (
+                      <span className="absolute -top-1 -right-1 text-[8px] font-black font-mono tracking-tighter uppercase px-1 py-0.5 rounded-full bg-rose-600 text-white shadow-sm z-10">
+                        TAKEN
+                      </span>
+                    )}
+                    {isMyTeam && (
+                      <span className="absolute -top-1 -right-1 text-[8px] font-black font-mono tracking-tighter uppercase px-1 py-0.5 rounded-full bg-emerald-600 text-white shadow-sm z-10">
+                        YOU
+                      </span>
+                    )}
                     <div className="w-8 h-8 flex items-center justify-center">
                       <img
                         src={team.logo}
@@ -330,13 +454,27 @@ export const LobbyView: FC<LobbyViewProps> = ({
                         loading="lazy"
                       />
                     </div>
-                    <span className="text-[10px] font-mono font-black tracking-tight" style={{ color: team.primaryColor }}>
+                    <span
+                      className="text-[10px] font-mono font-black tracking-tight"
+                      style={{ color: isTakenByOther ? '#ef4444' : team.primaryColor }}
+                    >
                       {team.shortName}
                     </span>
                   </button>
                 );
               })}
             </div>
+
+            {takenParticipants.length > 0 && (
+              <div className="flex items-center justify-between text-[11px] font-mono pt-1 text-zinc-400">
+                <span className="text-purple-600 dark:text-purple-300 font-bold">
+                  {takenParticipants.length} franchise{takenParticipants.length > 1 ? 's' : ''} claimed
+                </span>
+                <span className="text-rose-500 font-bold text-[10px]">
+                  No duplicates allowed
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Join Button (Solid Purple) */}

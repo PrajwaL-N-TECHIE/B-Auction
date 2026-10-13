@@ -1,7 +1,7 @@
-import { useState, useEffect, type FC } from 'react';
-import { Gavel, Trophy, ArrowUp, AlertCircle, Sparkles, CheckCircle2 } from 'lucide-react';
+import { useState, useEffect, useRef, type FC } from 'react';
+import { Gavel, Trophy, ArrowUp, AlertCircle, Sparkles, CheckCircle2, X } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import type { AuctionRoom, AuctionParticipant } from '../types/auction';
+import type { AuctionRoom, AuctionParticipant, AuctionLot } from '../types/auction';
 import { placeBid } from '../services/auctionSync';
 import { sound } from '../utils/soundEffects';
 import { AvatarDisplay } from './AvatarDisplay';
@@ -17,6 +17,8 @@ export const PlayerView: FC<PlayerViewProps> = ({ room, participant, isLight = f
   const [errorMsg, setErrorMsg] = useState('');
   const [customBidAmount, setCustomBidAmount] = useState<string>('');
   const [activeTab, setActiveTab] = useState<'bidding' | 'squad'>('bidding');
+  const [celebrationLot, setCelebrationLot] = useState<AuctionLot | null>(null);
+  const celebratedLotIds = useRef<Set<string>>(new Set());
 
   const currentLot = room.lots[room.currentLotIndex];
   const myParticipant = room.participants[participant.id] || participant;
@@ -35,20 +37,98 @@ export const PlayerView: FC<PlayerViewProps> = ({ room, participant, isLight = f
     }
   }, [room.highestBidder?.participantId, participant.id]);
 
-  // Celebration when lot is sold to me
+  const triggerVictoryConfetti = () => {
+    sound.playSoldFanfare();
+    sound.triggerHaptic([150, 80, 150, 80, 400]);
+
+    try {
+      // Left cannon blast
+      confetti({
+        particleCount: 80,
+        angle: 60,
+        spread: 60,
+        origin: { x: 0, y: 0.7 },
+        colors: ['#a855f7', '#7c3aed', '#facc15', '#ec1c24', '#004ba0', '#10b981']
+      });
+
+      // Right cannon blast
+      confetti({
+        particleCount: 80,
+        angle: 120,
+        spread: 60,
+        origin: { x: 1, y: 0.7 },
+        colors: ['#a855f7', '#7c3aed', '#facc15', '#ec1c24', '#004ba0', '#10b981']
+      });
+
+      // Secondary fireworks starburst in center
+      setTimeout(() => {
+        try {
+          confetti({
+            particleCount: 110,
+            spread: 110,
+            origin: { y: 0.5 },
+            colors: ['#facc15', '#ffd700', '#a855f7', '#ffffff']
+          });
+        } catch {}
+      }, 250);
+
+      // Tertiary fountain burst
+      setTimeout(() => {
+        try {
+          confetti({
+            particleCount: 70,
+            spread: 120,
+            origin: { y: 0.6 }
+          });
+        } catch {}
+      }, 550);
+    } catch {}
+  };
+
+  // Celebration & confetti blast when a player is sold to this bidder
   useEffect(() => {
-    if (currentLot && currentLot.status === 'sold' && currentLot.soldTo?.participantId === participant.id) {
-      sound.playSoldFanfare();
-      try {
-        confetti({
-          particleCount: 90,
-          spread: 90,
-          origin: { y: 0.6 },
-          colors: ['#a855f7', '#7c3aed', '#facc15', '#3b82f6', '#10b981']
-        });
-      } catch {}
+    // 1. Direct check on current lot
+    const isCurrentSoldToMe =
+      (currentLot &&
+        currentLot.status === 'sold' &&
+        currentLot.soldTo?.participantId === participant.id) ||
+      (room.gavelPhase === 'sold' &&
+        room.highestBidder?.participantId === participant.id);
+
+    if (isCurrentSoldToMe && currentLot && !celebratedLotIds.current.has(currentLot.id)) {
+      celebratedLotIds.current.add(currentLot.id);
+      setCelebrationLot(currentLot);
+      triggerVictoryConfetti();
     }
-  }, [currentLot?.status, currentLot?.soldTo?.participantId, participant.id]);
+
+    // 2. Check if my wonLots was updated
+    const lastWon = myParticipant.wonLots?.[0];
+    if (lastWon && !celebratedLotIds.current.has(lastWon.id)) {
+      celebratedLotIds.current.add(lastWon.id);
+      setCelebrationLot(lastWon);
+      triggerVictoryConfetti();
+    }
+
+    // 3. Scan all room.lots for any newly marked sold lot to this participant
+    room.lots.forEach((lot) => {
+      if (lot.status === 'sold' && lot.soldTo?.participantId === participant.id) {
+        if (!celebratedLotIds.current.has(lot.id)) {
+          celebratedLotIds.current.add(lot.id);
+          setCelebrationLot(lot);
+          triggerVictoryConfetti();
+        }
+      }
+    });
+  }, [
+    currentLot?.status,
+    currentLot?.soldTo?.participantId,
+    currentLot?.id,
+    room.gavelPhase,
+    room.highestBidder?.participantId,
+    room.lots,
+    myParticipant.wonLots,
+    participant.id
+  ]);
 
   const handleQuickBid = async (increment: number) => {
     if (submitting || isHighestBidder || currentLot?.status !== 'bidding') return;
@@ -398,6 +478,80 @@ export const PlayerView: FC<PlayerViewProps> = ({ room, participant, isLight = f
               <p className="text-[11px] mt-1">Raise your bids on the current lot to sign stars to your team!</p>
             </div>
           )}
+        </div>
+      )}
+
+      {/* VICTORY CELEBRATION MODAL WHEN BIDDER WINS LOT */}
+      {celebrationLot && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-xl animate-in fade-in zoom-in-95 duration-200">
+          <div className="relative w-full max-w-sm rounded-3xl p-6 sm:p-8 border-2 border-amber-400 bg-gradient-to-b from-[#181028] via-[#0E0B1A] to-[#080612] text-white text-center shadow-[0_0_80px_rgba(250,204,21,0.4)] space-y-4">
+            {/* Pulsing Trophy Badge */}
+            <div className="w-16 h-16 mx-auto rounded-3xl bg-amber-400/20 border-2 border-amber-400/60 flex items-center justify-center shadow-[0_0_30px_rgba(250,204,21,0.5)] animate-bounce">
+              <Trophy size={34} className="text-amber-400" />
+            </div>
+
+            <div className="space-y-1">
+              <div className="text-[11px] font-mono uppercase tracking-widest text-amber-400 font-black">
+                ★ Hammer Down! Signed to Your Team ★
+              </div>
+              <h2 className="text-2xl sm:text-3xl font-black font-title tracking-tight text-white">
+                YOU WON THE LOT!
+              </h2>
+            </div>
+
+            {/* Player Spotlight Card */}
+            <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10 flex items-center gap-3.5 text-left">
+              <div className="w-16 h-16 rounded-2xl overflow-hidden border-2 border-amber-400 shrink-0 bg-purple-950/40">
+                {celebrationLot.imageUrl ? (
+                  <img
+                    src={celebrationLot.imageUrl}
+                    alt={celebrationLot.title}
+                    className="w-full h-full object-cover object-top"
+                  />
+                ) : (
+                  <span className="text-3xl flex items-center justify-center h-full">🏏</span>
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-base font-black text-white truncate">
+                  {celebrationLot.title}
+                </div>
+                <div className="text-[11px] text-zinc-400 truncate">
+                  {celebrationLot.category}
+                </div>
+                <div className="text-sm font-black font-mono text-amber-400 mt-1">
+                  Sold for: {room.currencySymbol}{celebrationLot.soldTo?.amount.toFixed(2)} {room.unitLabel}
+                </div>
+              </div>
+            </div>
+
+            <div className="p-3 rounded-2xl bg-purple-950/40 border border-purple-500/30 flex items-center justify-between text-xs">
+              <span className="text-zinc-400">Remaining Purse:</span>
+              <span className="font-mono font-black text-emerald-400 text-sm">
+                {room.currencySymbol}{remainingPurse.toFixed(2)} {room.unitLabel}
+              </span>
+            </div>
+
+            <div className="pt-2 flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setCelebrationLot(null);
+                  setActiveTab('squad');
+                }}
+                className="w-full py-3 px-4 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-black text-xs uppercase tracking-wider transition-all shadow-lg shadow-purple-600/30 cursor-pointer active:scale-95"
+              >
+                View in My Squad ({myParticipant.wonLots?.length || 1}) ➔
+              </button>
+              <button
+                type="button"
+                onClick={() => setCelebrationLot(null)}
+                className="w-full py-2 px-4 rounded-xl text-xs text-zinc-400 hover:text-white transition-colors cursor-pointer"
+              >
+                Continue Bidding
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

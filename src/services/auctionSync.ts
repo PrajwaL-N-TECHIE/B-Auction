@@ -190,6 +190,33 @@ export async function joinRoom(
     };
   }
 
+  const existingParticipants = Object.values(room.participants || {});
+  const isSameParticipant = Boolean(room.participants?.[participant.id]);
+
+  // Strict check: No duplicate team names or duplicate IPL franchises allowed!
+  if (!isSameParticipant) {
+    const cleanNameLower = participant.name.trim().toLowerCase();
+
+    // 1. Check duplicate name
+    const duplicateName = existingParticipants.find(
+      (p) => p.name.trim().toLowerCase() === cleanNameLower
+    );
+    if (duplicateName) {
+      throw new Error(`The team name "${participant.name}" is already taken! Each team must have a unique name.`);
+    }
+
+    // 2. Check duplicate IPL team avatar/logo
+    const duplicateAvatar = existingParticipants.find((p) => {
+      if (!p.avatar || !participant.avatar) return false;
+      const pLogo = p.avatar.split('?')[0].toLowerCase();
+      const newLogo = participant.avatar.split('?')[0].toLowerCase();
+      return pLogo === newLogo;
+    });
+    if (duplicateAvatar) {
+      throw new Error(`This IPL franchise has already been chosen by "${duplicateAvatar.name}"! No duplicate franchises are allowed in this arena.`);
+    }
+  }
+
   const existingParticipant = room.participants?.[participant.id];
   const fullParticipant: AuctionParticipant = {
     ...participant,
