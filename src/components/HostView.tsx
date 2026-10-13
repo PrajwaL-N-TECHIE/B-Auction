@@ -12,6 +12,7 @@ import {
 import { sound } from '../utils/soundEffects';
 import { ProjectorModal } from './ProjectorModal';
 import { AvatarDisplay } from './AvatarDisplay';
+import { detectAuctionMode, getModeConfig } from '../constants/auctionModes';
 
 interface HostViewProps {
   room: AuctionRoom;
@@ -25,6 +26,8 @@ export const HostView: FC<HostViewProps> = ({ room, isLight = false }) => {
   const [copiedLink, setCopiedLink] = useState(false);
   const [activeTab, setActiveTab] = useState<'bids' | 'teams' | 'catalog'>('bids');
 
+  const currentMode = detectAuctionMode(room);
+  const modeConfig = getModeConfig(currentMode);
   const currentLot = room.lots[room.currentLotIndex];
   const participantsList = Object.values(room.participants || {});
   const highestBidder = room.highestBidder;
@@ -248,7 +251,7 @@ export const HostView: FC<HostViewProps> = ({ room, isLight = false }) => {
                       }}
                     />
                   ) : (
-                    <div className="text-4xl">🏏</div>
+                    <div className="text-4xl">{modeConfig.fallbackEmoji}</div>
                   )}
                 </div>
                 {currentLot.rating && (

@@ -219,6 +219,107 @@ export const SAMPLE_LOT_PACKS: LotPack[] = [
     ]
   },
   {
+    id: 'football',
+    name: 'European Champions Football Draft',
+    description: 'Sign world-class strikers, playmakers, and defenders into your European powerhouse club with € Millions purse.',
+    currencySymbol: '€',
+    unitLabel: 'M',
+    defaultPurse: 500, // 500M
+    minIncrement: 5, // 5M
+    lots: [
+      {
+        id: 'lot_f1',
+        title: 'Lionel Messi',
+        category: 'Playmaker & Forward Legend',
+        description: '8-time Ballon d’Or winner with supernatural vision, dribbling, and free-kick precision.',
+        imageUrl: 'https://images.unsplash.com/photo-1579952363873-27f3bade9f55?w=500&auto=format&fit=crop&q=80',
+        basePrice: 60,
+        rating: 99,
+        stats: [
+          { label: 'Position', value: 'Forward / AM' },
+          { label: 'Goals', value: '830+' },
+          { label: 'Ballon d’Or', value: '8 Titles' }
+        ],
+        status: 'upcoming'
+      },
+      {
+        id: 'lot_f2',
+        title: 'Cristiano Ronaldo',
+        category: 'Apex Goal Machine',
+        description: 'All-time leading international goalscorer and clutch Champions League serial winner.',
+        imageUrl: 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?w=500&auto=format&fit=crop&q=80',
+        basePrice: 60,
+        rating: 98,
+        stats: [
+          { label: 'Position', value: 'Striker / LW' },
+          { label: 'UCL Goals', value: '140+' },
+          { label: 'Ballon d’Or', value: '5 Titles' }
+        ],
+        status: 'upcoming'
+      },
+      {
+        id: 'lot_f3',
+        title: 'Kylian Mbappé',
+        category: 'Generational Express Forward',
+        description: 'Electrifying pace, world cup hat-trick hero, and lethal finisher from any angle.',
+        imageUrl: 'https://images.unsplash.com/photo-1517466787929-bc90951d0974?w=500&auto=format&fit=crop&q=80',
+        basePrice: 80,
+        rating: 98,
+        stats: [
+          { label: 'Top Speed', value: '38.0 km/h' },
+          { label: 'World Cup', value: '12 Goals' },
+          { label: 'Position', value: 'Forward / LW' }
+        ],
+        status: 'upcoming'
+      },
+      {
+        id: 'lot_f4',
+        title: 'Erling Haaland',
+        category: 'Viking Goal Machine',
+        description: 'Unstoppable physical powerhouse and record-shattering Premier League golden boot winner.',
+        imageUrl: 'https://images.unsplash.com/photo-1543326727-cf6c39e8f84c?w=500&auto=format&fit=crop&q=80',
+        basePrice: 80,
+        rating: 97,
+        stats: [
+          { label: 'Position', value: 'Striker' },
+          { label: 'Goals/Game', value: '0.98' },
+          { label: 'UCL Goals', value: '45+ in 42 apps' }
+        ],
+        status: 'upcoming'
+      },
+      {
+        id: 'lot_f5',
+        title: 'Kevin De Bruyne',
+        category: 'Maestro Vision Playmaker',
+        description: 'Unmatched passing vision and deadly pinpoint crosses with generational football IQ.',
+        imageUrl: 'https://images.unsplash.com/photo-1560272564-c83b66b1ad12?w=500&auto=format&fit=crop&q=80',
+        basePrice: 50,
+        rating: 97,
+        stats: [
+          { label: 'Position', value: 'Central Midfield' },
+          { label: 'Assists', value: '250+' },
+          { label: 'Chances Created', value: 'Top 1% Europe' }
+        ],
+        status: 'upcoming'
+      },
+      {
+        id: 'lot_f6',
+        title: 'Jude Bellingham',
+        category: 'Complete Box-to-Box Galáctico',
+        description: 'Dynamic clutch match-winner dominating midfield tackles, runs, and stoppage-time goals.',
+        imageUrl: 'https://images.unsplash.com/photo-1522778119026-d647f0596c20?w=500&auto=format&fit=crop&q=80',
+        basePrice: 70,
+        rating: 96,
+        stats: [
+          { label: 'Position', value: 'Attacking Midfield' },
+          { label: 'Distance Run', value: '11.8 km/match' },
+          { label: 'Trophies', value: 'UCL Winner' }
+        ],
+        status: 'upcoming'
+      }
+    ]
+  },
+  {
     id: 'startup',
     name: 'Tech Unicorn Dream Team Draft',
     description: 'Assemble the ultimate engineering & product team with your $1M VC purse.',

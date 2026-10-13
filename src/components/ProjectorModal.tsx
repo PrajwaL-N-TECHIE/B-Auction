@@ -4,6 +4,7 @@ import { X, Maximize, Minimize, Gavel, Sparkles, Copy, Check, Users, Trophy } fr
 import confetti from 'canvas-confetti';
 import type { AuctionRoom } from '../types/auction';
 import { AvatarDisplay } from './AvatarDisplay';
+import { detectAuctionMode, getModeConfig } from '../constants/auctionModes';
 
 interface ProjectorModalProps {
   isOpen: boolean;
@@ -20,6 +21,9 @@ export const ProjectorModal: FC<ProjectorModalProps> = ({
   const [copied, setCopied] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
   const lastSoldRef = useRef<string | null>(null);
+
+  const currentMode = detectAuctionMode(room);
+  const modeConfig = getModeConfig(currentMode);
 
   // Keyboard controls (Esc to close, F for fullscreen)
   useEffect(() => {
@@ -217,7 +221,7 @@ export const ProjectorModal: FC<ProjectorModalProps> = ({
                         }}
                       />
                     ) : (
-                      <span className="text-5xl">🏏</span>
+                      <span className="text-5xl">{modeConfig.fallbackEmoji}</span>
                     )}
                   </div>
                   {currentLot.rating && (

@@ -5,6 +5,7 @@ import type { AuctionRoom, AuctionParticipant, AuctionLot } from '../types/aucti
 import { placeBid } from '../services/auctionSync';
 import { sound } from '../utils/soundEffects';
 import { AvatarDisplay } from './AvatarDisplay';
+import { detectAuctionMode, getModeConfig } from '../constants/auctionModes';
 
 interface PlayerViewProps {
   room: AuctionRoom;
@@ -19,6 +20,9 @@ export const PlayerView: FC<PlayerViewProps> = ({ room, participant, isLight = f
   const [activeTab, setActiveTab] = useState<'bidding' | 'squad'>('bidding');
   const [celebrationLot, setCelebrationLot] = useState<AuctionLot | null>(null);
   const celebratedLotIds = useRef<Set<string>>(new Set());
+
+  const currentMode = detectAuctionMode(room);
+  const modeConfig = getModeConfig(currentMode);
 
   const currentLot = room.lots[room.currentLotIndex];
   const myParticipant = room.participants[participant.id] || participant;
@@ -245,7 +249,7 @@ export const PlayerView: FC<PlayerViewProps> = ({ room, participant, isLight = f
           }`}
         >
           <Trophy size={14} />
-          <span>My Squad ({myParticipant.wonLots?.length || 0})</span>
+          <span>My {modeConfig.squadLabel} ({myParticipant.wonLots?.length || 0})</span>
         </button>
       </div>
 
@@ -282,7 +286,7 @@ export const PlayerView: FC<PlayerViewProps> = ({ room, participant, isLight = f
                       }}
                     />
                   ) : (
-                    <span className="text-2xl">🏏</span>
+                    <span className="text-2xl">{modeConfig.fallbackEmoji}</span>
                   )}
                 </div>
                 {currentLot.rating && (
@@ -541,7 +545,7 @@ export const PlayerView: FC<PlayerViewProps> = ({ room, participant, isLight = f
                 }}
                 className="w-full py-3 px-4 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-black text-xs uppercase tracking-wider transition-all shadow-lg shadow-purple-600/30 cursor-pointer active:scale-95"
               >
-                View in My Squad ({myParticipant.wonLots?.length || 1}) ➔
+                View in My {modeConfig.squadLabel} ({myParticipant.wonLots?.length || 1}) ➔
               </button>
               <button
                 type="button"

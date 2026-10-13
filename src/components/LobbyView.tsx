@@ -1,10 +1,16 @@
 import { useState, useEffect, type FC } from 'react';
-import { ArrowRight, Sparkles, Gavel, Shield, Dices, Plus } from 'lucide-react';
+import { ArrowRight, Sparkles, Gavel, Shield, Dices, Plus, Trophy, Zap, Cpu } from 'lucide-react';
 import { generateRoomCode, createRoom, joinRoom, subscribeRoom, getCachedRoom } from '../services/auctionSync';
 import type { AuctionParticipant, AuctionRoom } from '../types/auction';
-import { BUIZ_AVATAR_PRESETS, getRandomAvatar, DEFAULT_AVATAR } from '../constants/avatars';
-import { IPL_TEAMS, getIPLTeamByLogo, type IPLTeam } from '../constants/iplTeams';
 import { SAMPLE_LOT_PACKS } from '../constants/samplePacks';
+import {
+  AUCTION_MODES,
+  detectAuctionMode,
+  getModeConfig,
+  getAvatarByUrlOrName,
+  type AuctionMode,
+  type ModeAvatar
+} from '../constants/auctionModes';
 
 interface LobbyViewProps {
   onJoinAsHost: (code: string) => void;
@@ -19,10 +25,10 @@ export const LobbyView: FC<LobbyViewProps> = ({
   initialRoomCode = '',
   isLight = false
 }) => {
-  const [mode, setMode] = useState<'join' | 'create'>(initialRoomCode ? 'join' : 'join');
+  const [mode, setMode] = useState<'join' | 'create'>('join');
 
   // Create Room State
-  const [createTitle, setCreateTitle] = useState('Premier League Auction');
+  const [createTitle, setCreateTitle] = useState('Premier Cricket Auction (IPL Mega Auction)');
   const [createCode, setCreateCode] = useState(generateRoomCode());
   const [selectedPackId, setSelectedPackId] = useState('cricket');
   const [customPurse, setCustomPurse] = useState<number>(100);
@@ -31,7 +37,8 @@ export const LobbyView: FC<LobbyViewProps> = ({
   // Join Room State
   const [joinCode, setJoinCode] = useState(initialRoomCode || '');
   const [teamName, setTeamName] = useState('');
-  const [selectedAvatar, setSelectedAvatar] = useState(DEFAULT_AVATAR);
+  const [selectedJoinMode, setSelectedJoinMode] = useState<AuctionMode>('cricket');
+  const [selectedAvatar, setSelectedAvatar] = useState(AUCTION_MODES.cricket.avatars[0].logo);
   const [joining, setJoining] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [activeRoom, setActiveRoom] = useState<AuctionRoom | null>(null);
@@ -41,10 +48,16 @@ export const LobbyView: FC<LobbyViewProps> = ({
     const clean = joinCode.toUpperCase().trim();
     if (clean.length >= 6) {
       const cached = getCachedRoom(clean);
-      if (cached) setActiveRoom(cached);
+      if (cached) {
+        setActiveRoom(cached);
+        const rMode = detectAuctionMode(cached);
+        setSelectedJoinMode(rMode);
+      }
 
       const unsub = subscribeRoom(clean, (roomUpdate) => {
         setActiveRoom(roomUpdate);
+        const rMode = detectAuctionMode(roomUpdate);
+        setSelectedJoinMode(rMode);
       });
       return () => unsub();
     } else {
@@ -52,38 +65,66 @@ export const LobbyView: FC<LobbyViewProps> = ({
     }
   }, [joinCode]);
 
+  // Determine active mode dynamically
+  const currentMode: AuctionMode =
+    mode === 'create'
+      ? detectAuctionMode(selectedPackId)
+      : activeRoom
+      ? detectAuctionMode(activeRoom)
+      : selectedJoinMode;
+
+  const modeConfig = getModeConfig(currentMode);
+
   // Check taken teams in current room
   const cleanCode = joinCode.toUpperCase().trim();
   const takenParticipants = Object.values(activeRoom?.participants || {});
 
-  const getTakenInfo = (team: IPLTeam) => {
+  const getTakenInfo = (avatarItem: ModeAvatar) => {
     return takenParticipants.find((p) => {
       const pLogo = (p.avatar || '').split('?')[0].toLowerCase();
-      const tLogo = team.logo.split('?')[0].toLowerCase();
-      return pLogo === tLogo || pLogo.includes(team.shortName.toLowerCase());
+      const aLogo = avatarItem.logo.split('?')[0].toLowerCase();
+      return (
+        pLogo === aLogo ||
+        pLogo.includes(avatarItem.shortName.toLowerCase()) ||
+        pLogo.includes(avatarItem.id.toLowerCase())
+      );
     });
   };
 
-  // If currently selected avatar is taken by another bidder, switch to first available
+  // If currently selected avatar does not belong to current mode, or is taken, switch to first available
   useEffect(() => {
-    if (!activeRoom || takenParticipants.length === 0) return;
-    const clean = joinCode.toUpperCase().trim();
-    const myPid = clean ? localStorage.getItem(`bauction_pid_${clean}`) : null;
-    const currentTeam = getIPLTeamByLogo(selectedAvatar);
-    if (currentTeam) {
-      const taken = getTakenInfo(currentTeam);
-      if (taken && taken.id !== myPid) {
-        const firstAvailable = IPL_TEAMS.find((t) => {
-          const tInfo = getTakenInfo(t);
-          return !tInfo || tInfo.id === myPid;
-        });
-        if (firstAvailable) {
-          setSelectedAvatar(firstAvailable.logo);
-          setTeamName(firstAvailable.name);
+    const myPid = cleanCode ? localStorage.getItem(`bauction_pid_${cleanCode}`) : null;
+    const existsInCurrentMode = modeConfig.avatars.some((a) => {
+      const aLogo = a.logo.split('?')[0].toLowerCase();
+      const sLogo = selectedAvatar.split('?')[0].toLowerCase();
+      return aLogo === sLogo || a.id === selectedAvatar;
+    });
+
+    const isCurrentTaken = Boolean(
+      modeConfig.avatars.some((a) => {
+        const aLogo = a.logo.split('?')[0].toLowerCase();
+        const sLogo = selectedAvatar.split('?')[0].toLowerCase();
+        if (aLogo === sLogo || a.id === selectedAvatar) {
+          const taken = getTakenInfo(a);
+          return taken && taken.id !== myPid;
         }
+        return false;
+      })
+    );
+
+    if (!existsInCurrentMode || isCurrentTaken) {
+      const firstAvailable = modeConfig.avatars.find((a) => {
+        const taken = getTakenInfo(a);
+        return !taken || taken.id === myPid;
+      }) || modeConfig.avatars[0];
+
+      if (firstAvailable) {
+        setSelectedAvatar(firstAvailable.logo);
+        // Only override teamName if empty or if matching another team's default name
+        setTeamName(firstAvailable.name);
       }
     }
-  }, [activeRoom?.code, takenParticipants.length, joinCode]);
+  }, [currentMode, activeRoom?.code, takenParticipants.length]);
 
   // Update joinCode if initialRoomCode changes
   useEffect(() => {
@@ -104,24 +145,25 @@ export const LobbyView: FC<LobbyViewProps> = ({
   }, []);
 
   const handleRollAvatar = () => {
-    const clean = joinCode.toUpperCase().trim();
-    const myPid = clean ? localStorage.getItem(`bauction_pid_${clean}`) : null;
-    const available = IPL_TEAMS.filter((t) => {
-      const taken = getTakenInfo(t);
+    const myPid = cleanCode ? localStorage.getItem(`bauction_pid_${cleanCode}`) : null;
+    const available = modeConfig.avatars.filter((a) => {
+      const taken = getTakenInfo(a);
       return !taken || taken.id === myPid;
     });
     if (available.length > 0) {
-      const randomTeam = available[Math.floor(Math.random() * available.length)];
-      setSelectedAvatar(randomTeam.logo);
-      setTeamName(randomTeam.name);
+      const randomAvatar = available[Math.floor(Math.random() * available.length)];
+      setSelectedAvatar(randomAvatar.logo);
+      setTeamName(randomAvatar.name);
     } else {
-      setSelectedAvatar(getRandomAvatar());
+      const randomAvatar = modeConfig.avatars[Math.floor(Math.random() * modeConfig.avatars.length)];
+      setSelectedAvatar(randomAvatar.logo);
+      setTeamName(randomAvatar.name);
     }
   };
 
   const handlePackChange = (packId: string) => {
     setSelectedPackId(packId);
-    const pack = SAMPLE_LOT_PACKS.find(p => p.id === packId);
+    const pack = SAMPLE_LOT_PACKS.find((p) => p.id === packId);
     if (pack) {
       setCustomPurse(pack.defaultPurse);
       setCreateTitle(pack.name);
@@ -133,9 +175,9 @@ export const LobbyView: FC<LobbyViewProps> = ({
     if (!createCode.trim()) return;
     setCreating(true);
     try {
-      const cleanCode = createCode.toUpperCase().trim();
-      await createRoom(cleanCode, createTitle.trim(), selectedPackId, customPurse);
-      onJoinAsHost(cleanCode);
+      const cCode = createCode.toUpperCase().trim();
+      await createRoom(cCode, createTitle.trim(), selectedPackId, customPurse);
+      onJoinAsHost(cCode);
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to create auction room.');
     } finally {
@@ -146,22 +188,22 @@ export const LobbyView: FC<LobbyViewProps> = ({
   const handleJoinRoom = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
-    const cleanCode = joinCode.toUpperCase().trim();
+    const cCode = joinCode.toUpperCase().trim();
     const cleanName = teamName.trim();
 
-    if (!cleanCode) {
+    if (!cCode) {
       setErrorMsg('Please enter a valid room code.');
       return;
     }
     if (!cleanName) {
-      setErrorMsg('Please enter your Team / Franchise Name.');
+      setErrorMsg(`Please enter your ${modeConfig.teamFieldLabel.replace(':', '')}.`);
       return;
     }
 
     setJoining(true);
     try {
       // Re-use saved participant ID for this room so page refresh does not trigger duplicate error
-      const storagePidKey = `bauction_pid_${cleanCode}`;
+      const storagePidKey = `bauction_pid_${cCode}`;
       let participantId = localStorage.getItem(storagePidKey);
       if (!participantId) {
         participantId = `tm_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
@@ -184,7 +226,7 @@ export const LobbyView: FC<LobbyViewProps> = ({
           return;
         }
 
-        // 2. Check duplicate IPL franchise logo
+        // 2. Check duplicate avatar / emblem
         const duplicateAvatar = otherParticipants.find((p) => {
           if (!p.avatar) return false;
           const pLogo = p.avatar.split('?')[0].toLowerCase();
@@ -192,7 +234,7 @@ export const LobbyView: FC<LobbyViewProps> = ({
           return pLogo === chosenLogo;
         });
         if (duplicateAvatar) {
-          setErrorMsg(`This IPL franchise has already been chosen by "${duplicateAvatar.name}". Duplicate franchise entries are strictly not allowed!`);
+          setErrorMsg(`This franchise emblem is already chosen by "${duplicateAvatar.name}". Duplicate entries are strictly not allowed!`);
           setJoining(false);
           return;
         }
@@ -208,10 +250,10 @@ export const LobbyView: FC<LobbyViewProps> = ({
         joinedAt: Date.now()
       };
 
-      const room = await joinRoom(cleanCode, newParticipant);
+      const room = await joinRoom(cCode, newParticipant);
       const registered = room.participants[participantId];
       if (registered) {
-        onJoinAsPlayer(cleanCode, registered);
+        onJoinAsPlayer(cCode, registered);
       }
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to join auction.');
@@ -229,8 +271,11 @@ export const LobbyView: FC<LobbyViewProps> = ({
             ? 'bg-purple-100 border-purple-200 text-purple-700'
             : 'bg-purple-500/15 border-purple-500/30 text-purple-300'
         }`}>
-          <Sparkles size={13} className="text-purple-500" />
-          Real-Time Bidding & Franchise Draft
+          {currentMode === 'cricket' && <Sparkles size={13} className="text-purple-500" />}
+          {currentMode === 'football' && <Trophy size={13} className="text-amber-500" />}
+          {currentMode === 'startup' && <Zap size={13} className="text-emerald-500" />}
+          {currentMode === 'cyberpunk' && <Cpu size={13} className="text-rose-500" />}
+          <span>{modeConfig.badge}</span>
         </div>
         <h1 className={`text-3xl sm:text-5xl font-black font-title tracking-tight leading-tight ${
           isLight ? 'text-slate-900' : 'text-white'
@@ -240,7 +285,7 @@ export const LobbyView: FC<LobbyViewProps> = ({
         <p className={`text-xs sm:text-sm leading-relaxed ${
           isLight ? 'text-slate-600' : 'text-zinc-400'
         }`}>
-          Live auction platform for sports fantasy drafts, startup team bidding, and college fests. Raise bids from your phone with real-time budget tracking!
+          {modeConfig.heroTagline}
         </p>
       </div>
 
@@ -296,6 +341,42 @@ export const LobbyView: FC<LobbyViewProps> = ({
               : 'bg-[#0C0C14]/90 border-purple-500/40'
           }`}
         >
+          {/* Mode Selector Pill if Room is not yet joined */}
+          {!activeRoom && (
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className={`text-[11px] font-mono font-bold uppercase tracking-wider ${
+                  isLight ? 'text-slate-600' : 'text-zinc-400'
+                }`}>
+                  Select Auction Mode:
+                </label>
+                <span className="text-[10px] font-mono text-purple-500 font-bold">Auto-syncs with Room Code</span>
+              </div>
+              <div className="grid grid-cols-4 gap-1 p-1 rounded-2xl border bg-black/10 border-purple-500/20">
+                {(['cricket', 'football', 'startup', 'cyberpunk'] as AuctionMode[]).map((mId) => {
+                  const mConf = AUCTION_MODES[mId];
+                  const isActive = currentMode === mId;
+                  return (
+                    <button
+                      key={mId}
+                      type="button"
+                      onClick={() => setSelectedJoinMode(mId)}
+                      className={`py-1.5 px-1.5 rounded-xl text-[11px] font-bold font-mono transition-all text-center truncate cursor-pointer ${
+                        isActive
+                          ? 'bg-purple-600 text-white shadow'
+                          : isLight
+                          ? 'text-slate-600 hover:text-slate-900'
+                          : 'text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      {mConf.fallbackEmoji} {mId === 'cricket' ? 'IPL' : mId === 'football' ? 'Football' : mId === 'startup' ? 'Tech/VC' : 'Sci-Fi'}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Room Code */}
           <div>
             <label className={`block text-xs font-mono font-bold uppercase tracking-wider mb-2 ${
@@ -316,22 +397,27 @@ export const LobbyView: FC<LobbyViewProps> = ({
                   : 'bg-[#141224] border-purple-500/40 text-white placeholder-zinc-600'
               }`}
             />
+            {activeRoom && (
+              <p className="text-[11px] font-mono text-emerald-500 mt-1 text-center font-bold">
+                ✓ Connected to {activeRoom.title} ({activeRoom.currencySymbol}{activeRoom.initialPurse} {activeRoom.unitLabel})
+              </p>
+            )}
           </div>
 
-          {/* Team / Bidder Name */}
+          {/* Dynamic Team / Bidder Name */}
           <div>
             <label className={`block text-xs font-mono font-bold uppercase tracking-wider mb-2 ${
               isLight ? 'text-purple-700' : 'text-purple-300'
             }`}>
-              Team / Franchise Name:
+              {modeConfig.teamFieldLabel}
             </label>
             <input
               type="text"
               required
               value={teamName}
               onChange={(e) => setTeamName(e.target.value)}
-              placeholder="e.g. Royal Challengers or Apex Ventures..."
-              maxLength={28}
+              placeholder={modeConfig.teamPlaceholder}
+              maxLength={32}
               className={`w-full py-3 px-4 rounded-2xl border text-sm font-bold transition-all shadow-inner focus:outline-none focus:ring-2 focus:ring-purple-500 ${
                 isLight
                   ? 'bg-slate-50 border-purple-200 text-slate-900 placeholder-slate-400'
@@ -340,13 +426,13 @@ export const LobbyView: FC<LobbyViewProps> = ({
             />
           </div>
 
-          {/* IPL Franchise / Team Avatar Selector */}
+          {/* Dynamic Avatar Selector */}
           <div>
             <div className="flex items-center justify-between mb-2">
               <label className={`text-xs font-mono font-bold uppercase tracking-wider ${
                 isLight ? 'text-purple-700' : 'text-purple-300'
               }`}>
-                Choose IPL Franchise:
+                {modeConfig.avatarSelectorLabel}
               </label>
               <button
                 type="button"
@@ -358,63 +444,64 @@ export const LobbyView: FC<LobbyViewProps> = ({
               </button>
             </div>
 
-            {/* Selected IPL Team Highlight Banner */}
+            {/* Selected Team Highlight Banner */}
             {(() => {
-              const currentTeam = getIPLTeamByLogo(selectedAvatar) || IPL_TEAMS[0];
+              const currentAvatar = getAvatarByUrlOrName(selectedAvatar, currentMode) || modeConfig.avatars[0];
               return (
                 <div
                   className="mb-3 p-3 rounded-2xl border flex items-center gap-3 transition-all shadow-md"
                   style={{
                     backgroundColor: isLight ? '#faf5ff' : 'rgba(24, 18, 43, 0.9)',
-                    borderColor: currentTeam.primaryColor
+                    borderColor: currentAvatar.primaryColor
                   }}
                 >
                   <div className="w-14 h-14 p-1.5 rounded-xl bg-white shadow-sm border border-purple-100 flex items-center justify-center shrink-0">
                     <img
-                      src={currentTeam.logo}
-                      alt={currentTeam.name}
-                      className="w-full h-full object-contain"
+                      src={currentAvatar.logo}
+                      alt={currentAvatar.name}
+                      className="w-full h-full object-contain pointer-events-none"
                     />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
                       <span className="text-xs font-black font-title truncate text-slate-900 dark:text-white">
-                        {currentTeam.name}
+                        {currentAvatar.name}
                       </span>
                       <span
-                        className="text-[10px] font-black font-mono px-1.5 py-0.5 rounded text-white shrink-0"
-                        style={{ backgroundColor: currentTeam.primaryColor }}
+                        className="text-[10px] font-black font-mono px-1.5 py-0.5 rounded text-white shrink-0 shadow-sm"
+                        style={{ backgroundColor: currentAvatar.primaryColor }}
                       >
-                        {currentTeam.shortName}
+                        {currentAvatar.shortName}
                       </span>
                     </div>
                     <p className="text-[11px] font-mono text-purple-600 dark:text-purple-300 truncate mt-0.5">
-                      {currentTeam.tagline}
+                      {currentAvatar.tagline}
                     </p>
                   </div>
                 </div>
               );
             })()}
 
-            {/* 10 IPL Teams Grid */}
+            {/* 10 Mode Avatars Grid */}
             <div className="grid grid-cols-5 gap-2">
-              {IPL_TEAMS.map((team) => {
-                const clean = joinCode.toUpperCase().trim();
-                const myPid = clean ? localStorage.getItem(`bauction_pid_${clean}`) : null;
-                const takenInfo = getTakenInfo(team);
+              {modeConfig.avatars.map((av) => {
+                const myPid = cleanCode ? localStorage.getItem(`bauction_pid_${cleanCode}`) : null;
+                const takenInfo = getTakenInfo(av);
                 const isTakenByOther = Boolean(takenInfo && takenInfo.id !== myPid);
                 const isMyTeam = Boolean(takenInfo && takenInfo.id === myPid);
-                const isSelected = selectedAvatar === team.logo || selectedAvatar.includes(team.shortName.toLowerCase());
+                const aLogo = av.logo.split('?')[0].toLowerCase();
+                const sLogo = selectedAvatar.split('?')[0].toLowerCase();
+                const isSelected = aLogo === sLogo || selectedAvatar.includes(av.shortName.toLowerCase());
 
                 return (
                   <button
-                    key={team.id}
+                    key={av.id}
                     type="button"
                     disabled={isTakenByOther}
                     onClick={() => {
                       if (isTakenByOther) return;
-                      setSelectedAvatar(team.logo);
-                      setTeamName(team.name);
+                      setSelectedAvatar(av.logo);
+                      setTeamName(av.name);
                       setErrorMsg('');
                     }}
                     className={`h-16 rounded-2xl p-1.5 flex flex-col items-center justify-center gap-1 transition-all relative group ${
@@ -427,13 +514,13 @@ export const LobbyView: FC<LobbyViewProps> = ({
                         : 'bg-white/5 hover:bg-white/10 border border-white/10 opacity-75 hover:opacity-100 cursor-pointer'
                     }`}
                     style={isSelected && !isTakenByOther ? {
-                      borderColor: team.primaryColor,
+                      borderColor: av.primaryColor,
                       backgroundColor: isLight ? '#ffffff' : 'rgba(255, 255, 255, 0.1)'
                     } : undefined}
                     title={
                       isTakenByOther
                         ? `Claimed by ${takenInfo?.name || 'another team'} - Duplicate entries not allowed`
-                        : `${team.name} (${team.shortName})`
+                        : `${av.name} (${av.shortName})`
                     }
                   >
                     {isTakenByOther && (
@@ -448,17 +535,17 @@ export const LobbyView: FC<LobbyViewProps> = ({
                     )}
                     <div className="w-8 h-8 flex items-center justify-center">
                       <img
-                        src={team.logo}
-                        alt={team.shortName}
+                        src={av.logo}
+                        alt={av.shortName}
                         className="w-full h-full object-contain pointer-events-none drop-shadow-sm"
                         loading="lazy"
                       />
                     </div>
                     <span
                       className="text-[10px] font-mono font-black tracking-tight"
-                      style={{ color: isTakenByOther ? '#ef4444' : team.primaryColor }}
+                      style={{ color: isTakenByOther ? '#ef4444' : av.primaryColor }}
                     >
-                      {team.shortName}
+                      {av.shortName}
                     </span>
                   </button>
                 );
@@ -560,36 +647,47 @@ export const LobbyView: FC<LobbyViewProps> = ({
             <label className={`block text-xs font-mono font-bold uppercase tracking-wider mb-2 ${
               isLight ? 'text-purple-700' : 'text-purple-300'
             }`}>
-              Select Lot Pack:
+              Select Lot Pack (Auction Mode):
             </label>
             <div className="space-y-2">
-              {SAMPLE_LOT_PACKS.map((pack) => (
-                <button
-                  key={pack.id}
-                  type="button"
-                  onClick={() => handlePackChange(pack.id)}
-                  className={`w-full p-3 rounded-2xl text-left border transition-all cursor-pointer ${
-                    selectedPackId === pack.id
-                      ? isLight
-                        ? 'bg-purple-50 border-purple-500 text-purple-950 shadow-sm'
-                        : 'bg-purple-600/30 border-purple-400 text-white shadow-md'
-                      : isLight
-                      ? 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
-                      : 'bg-[#141224] border-purple-500/20 text-zinc-400 hover:text-white'
-                  }`}
-                >
-                  <div className={`text-xs font-bold ${
-                    selectedPackId === pack.id ? (isLight ? 'text-purple-900' : 'text-white') : (isLight ? 'text-slate-800' : 'text-zinc-300')
-                  }`}>
-                    {pack.name} ({pack.lots.length} lots)
-                  </div>
-                  <div className={`text-[10px] mt-0.5 ${
-                    isLight ? 'text-slate-500' : 'text-zinc-400'
-                  }`}>
-                    Purse: {pack.currencySymbol}{pack.defaultPurse} {pack.unitLabel} • Min +{pack.currencySymbol}{pack.minIncrement} {pack.unitLabel}
-                  </div>
-                </button>
-              ))}
+              {SAMPLE_LOT_PACKS.map((pack) => {
+                const packMode = detectAuctionMode(pack.id);
+                const packConf = getModeConfig(packMode);
+                const isSelected = selectedPackId === pack.id;
+                return (
+                  <button
+                    key={pack.id}
+                    type="button"
+                    onClick={() => handlePackChange(pack.id)}
+                    className={`w-full p-3 rounded-2xl text-left border transition-all cursor-pointer ${
+                      isSelected
+                        ? isLight
+                          ? 'bg-purple-50 border-purple-500 text-purple-950 shadow-sm'
+                          : 'bg-purple-600/30 border-purple-400 text-white shadow-md'
+                        : isLight
+                        ? 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                        : 'bg-[#141224] border-purple-500/20 text-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className={`text-xs font-bold flex items-center gap-1.5 ${
+                        isSelected ? (isLight ? 'text-purple-900' : 'text-white') : (isLight ? 'text-slate-800' : 'text-zinc-300')
+                      }`}>
+                        <span>{packConf.fallbackEmoji}</span>
+                        <span>{pack.name}</span>
+                      </div>
+                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 font-bold shrink-0">
+                        {pack.lots.length} {packConf.lotLabel}s
+                      </span>
+                    </div>
+                    <div className={`text-[10px] mt-1 ${
+                      isLight ? 'text-slate-500' : 'text-zinc-400'
+                    }`}>
+                      Starting Purse: {pack.currencySymbol}{pack.defaultPurse} {pack.unitLabel} • Min Bid +{pack.currencySymbol}{pack.minIncrement} {pack.unitLabel}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -598,7 +696,7 @@ export const LobbyView: FC<LobbyViewProps> = ({
             <label className={`block text-xs font-mono font-bold uppercase tracking-wider mb-2 ${
               isLight ? 'text-purple-700' : 'text-purple-300'
             }`}>
-              Starting Purse Per Team ({SAMPLE_LOT_PACKS.find(p => p.id === selectedPackId)?.unitLabel || 'Credits'}):
+              Starting Purse Per Team ({modeConfig.currencySymbol} {modeConfig.unitLabel}):
             </label>
             <input
               type="number"
@@ -625,7 +723,7 @@ export const LobbyView: FC<LobbyViewProps> = ({
             ) : (
               <>
                 <Plus size={16} />
-                <span>Launch Auction Arena</span>
+                <span>Launch {modeConfig.badge}</span>
               </>
             )}
           </button>

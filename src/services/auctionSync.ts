@@ -115,6 +115,8 @@ export async function createRoom(
   const initialRoom: AuctionRoom = {
     code: cleanCode,
     title: title || selectedPack.name,
+    packId: selectedPack.id,
+    mode: selectedPack.id,
     currencySymbol: selectedPack.currencySymbol,
     unitLabel: selectedPack.unitLabel,
     initialPurse: purse,

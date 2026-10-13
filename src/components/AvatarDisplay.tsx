@@ -1,5 +1,5 @@
 import { useState, type FC } from 'react';
-import { getIPLTeamByLogo } from '../constants/iplTeams';
+import { getAvatarByUrlOrName } from '../constants/auctionModes';
 
 interface AvatarDisplayProps {
   avatar: string;
@@ -17,17 +17,18 @@ export const AvatarDisplay: FC<AvatarDisplayProps> = ({
   showBadge = false
 }) => {
   const [hasError, setHasError] = useState(false);
-  const team = getIPLTeamByLogo(avatar);
+  const team = getAvatarByUrlOrName(avatar);
 
   const isImage = !hasError && avatar && (
     avatar.startsWith('/') ||
     avatar.startsWith('http') ||
+    avatar.startsWith('data:') ||
     avatar.includes('teams') ||
     avatar.includes('dicebear')
   );
 
   // Fallback initials
-  const initials = team?.shortName || name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase() || '🏏';
+  const initials = team?.shortName || name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase() || '★';
 
   if (isImage) {
     return (

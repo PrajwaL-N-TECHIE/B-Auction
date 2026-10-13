@@ -45,6 +45,8 @@ export type GavelPhase = 'idle' | 'going_once' | 'going_twice' | 'sold' | 'unsol
 export interface AuctionRoom {
   code: string;
   title: string;
+  packId?: string;
+  mode?: string;
   currencySymbol: string; // e.g. '₹' or '$'
   unitLabel: string; // e.g. 'Cr', 'Lakh', ''
   initialPurse: number;
