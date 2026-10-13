@@ -41,7 +41,7 @@ export default function App() {
     });
   };
 
-  // Check URL query parameter (?room=AUC-729)
+  // Check URL query parameter (?room=AUC-729) & restore tab session
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
@@ -49,6 +49,26 @@ export default function App() {
       if (r) {
         setUrlRoomCode(r.toUpperCase().trim());
       }
+
+      // Check tab-isolated session
+      try {
+        const savedRole = sessionStorage.getItem('bauction_tab_role') as 'host' | 'player' | null;
+        const savedCode = sessionStorage.getItem('bauction_tab_code');
+        const savedPid = sessionStorage.getItem('bauction_tab_active_pid');
+
+        if (savedRole && savedCode) {
+          const cleanCode = savedCode.toUpperCase().trim();
+          const cached = getCachedRoom(cleanCode);
+          if (cached) {
+            setRoomCode(cleanCode);
+            setRole(savedRole);
+            setCurrentRoom(cached);
+            if (savedRole === 'player' && savedPid && cached.participants[savedPid]) {
+              setCurrentParticipant(cached.participants[savedPid]);
+            }
+          }
+        }
+      } catch {}
     }
   }, []);
 
@@ -75,6 +95,11 @@ export default function App() {
     const cleanCode = code.toUpperCase().trim();
     setRole('host');
     setRoomCode(cleanCode);
+    try {
+      sessionStorage.setItem('bauction_tab_role', 'host');
+      sessionStorage.setItem('bauction_tab_code', cleanCode);
+      sessionStorage.removeItem('bauction_tab_active_pid');
+    } catch {}
     const cached = getCachedRoom(cleanCode);
     if (cached) {
       setCurrentRoom(cached);
@@ -92,6 +117,11 @@ export default function App() {
     setRole('player');
     setRoomCode(cleanCode);
     setCurrentParticipant(participant);
+    try {
+      sessionStorage.setItem('bauction_tab_role', 'player');
+      sessionStorage.setItem('bauction_tab_code', cleanCode);
+      sessionStorage.setItem('bauction_tab_active_pid', participant.id);
+    } catch {}
     const cached = getCachedRoom(cleanCode);
     if (cached) {
       setCurrentRoom({
@@ -115,6 +145,11 @@ export default function App() {
     setRoomCode(null);
     setCurrentRoom(null);
     setCurrentParticipant(null);
+    try {
+      sessionStorage.removeItem('bauction_tab_role');
+      sessionStorage.removeItem('bauction_tab_code');
+      sessionStorage.removeItem('bauction_tab_active_pid');
+    } catch {}
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
       url.searchParams.delete('room');

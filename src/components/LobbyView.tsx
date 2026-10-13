@@ -93,7 +93,13 @@ export const LobbyView: FC<LobbyViewProps> = ({
 
   // If currently selected avatar does not belong to current mode, or is taken, switch to first available
   useEffect(() => {
-    const myPid = cleanCode ? localStorage.getItem(`bauction_pid_${cleanCode}`) : null;
+    const savedPid = cleanCode ? sessionStorage.getItem(`bauction_tab_pid_${cleanCode}`) : null;
+    const savedTeamName = cleanCode ? sessionStorage.getItem(`bauction_tab_name_${cleanCode}`) : null;
+    const isMyRegisteredTeam = Boolean(
+      savedPid && savedTeamName && teamName.trim().toLowerCase() === savedTeamName.toLowerCase()
+    );
+    const myPid = isMyRegisteredTeam ? savedPid : null;
+
     const existsInCurrentMode = modeConfig.avatars.some((a) => {
       const aLogo = a.logo.split('?')[0].toLowerCase();
       const sLogo = selectedAvatar.split('?')[0].toLowerCase();
@@ -134,18 +140,24 @@ export const LobbyView: FC<LobbyViewProps> = ({
     }
   }, [initialRoomCode]);
 
-  // Load saved preferences
+  // Load saved preferences (isolated to current tab session)
   useEffect(() => {
     try {
-      const savedName = localStorage.getItem('bauction_team_name');
+      const savedName = sessionStorage.getItem('bauction_team_name');
       if (savedName) setTeamName(savedName);
-      const savedAvatar = localStorage.getItem('bauction_team_avatar');
+      const savedAvatar = sessionStorage.getItem('bauction_team_avatar');
       if (savedAvatar) setSelectedAvatar(savedAvatar);
     } catch {}
   }, []);
 
   const handleRollAvatar = () => {
-    const myPid = cleanCode ? localStorage.getItem(`bauction_pid_${cleanCode}`) : null;
+    const savedPid = cleanCode ? sessionStorage.getItem(`bauction_tab_pid_${cleanCode}`) : null;
+    const savedTeamName = cleanCode ? sessionStorage.getItem(`bauction_tab_name_${cleanCode}`) : null;
+    const isMyRegisteredTeam = Boolean(
+      savedPid && savedTeamName && teamName.trim().toLowerCase() === savedTeamName.toLowerCase()
+    );
+    const myPid = isMyRegisteredTeam ? savedPid : null;
+
     const available = modeConfig.avatars.filter((a) => {
       const taken = getTakenInfo(a);
       return !taken || taken.id === myPid;
@@ -202,12 +214,19 @@ export const LobbyView: FC<LobbyViewProps> = ({
 
     setJoining(true);
     try {
-      // Re-use saved participant ID for this room so page refresh does not trigger duplicate error
-      const storagePidKey = `bauction_pid_${cCode}`;
-      let participantId = localStorage.getItem(storagePidKey);
-      if (!participantId) {
-        participantId = `tm_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-        localStorage.setItem(storagePidKey, participantId);
+      // Session-isolated participant identification per tab
+      const savedPid = sessionStorage.getItem(`bauction_tab_pid_${cCode}`);
+      const savedTeamName = sessionStorage.getItem(`bauction_tab_name_${cCode}`);
+
+      let participantId: string;
+      // Only reuse existing ID if reconnecting as the exact same team name in this tab session
+      if (savedPid && savedTeamName && savedTeamName.trim().toLowerCase() === cleanName.toLowerCase()) {
+        participantId = savedPid;
+      } else {
+        // Different team or new/duplicated tab: generate a brand new unique participant ID
+        participantId = `tm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        sessionStorage.setItem(`bauction_tab_pid_${cCode}`, participantId);
+        sessionStorage.setItem(`bauction_tab_name_${cCode}`, cleanName);
       }
 
       // Pre-flight duplicate check against live room state
@@ -240,8 +259,8 @@ export const LobbyView: FC<LobbyViewProps> = ({
         }
       }
 
-      localStorage.setItem('bauction_team_name', cleanName);
-      localStorage.setItem('bauction_team_avatar', selectedAvatar);
+      sessionStorage.setItem('bauction_team_name', cleanName);
+      sessionStorage.setItem('bauction_team_avatar', selectedAvatar);
 
       const newParticipant: Omit<AuctionParticipant, 'purse' | 'initialPurse' | 'wonLots'> = {
         id: participantId,
@@ -251,8 +270,12 @@ export const LobbyView: FC<LobbyViewProps> = ({
       };
 
       const room = await joinRoom(cCode, newParticipant);
-      const registered = room.participants[participantId];
+      // In case joinRoom reassigned ID to avoid collision, grab the participant that matches our cleanName
+      const registered = room.participants[participantId] || Object.values(room.participants).find(
+        p => p.name.trim().toLowerCase() === cleanName.toLowerCase()
+      );
       if (registered) {
+        sessionStorage.setItem(`bauction_tab_pid_${cCode}`, registered.id);
         onJoinAsPlayer(cCode, registered);
       }
     } catch (err: any) {
@@ -485,7 +508,13 @@ export const LobbyView: FC<LobbyViewProps> = ({
             {/* 10 Mode Avatars Grid */}
             <div className="grid grid-cols-5 gap-2">
               {modeConfig.avatars.map((av) => {
-                const myPid = cleanCode ? localStorage.getItem(`bauction_pid_${cleanCode}`) : null;
+                const savedPid = cleanCode ? sessionStorage.getItem(`bauction_tab_pid_${cleanCode}`) : null;
+                const savedTeamName = cleanCode ? sessionStorage.getItem(`bauction_tab_name_${cleanCode}`) : null;
+                const isMyRegisteredTeam = Boolean(
+                  savedPid && savedTeamName && teamName.trim().toLowerCase() === savedTeamName.toLowerCase()
+                );
+                const myPid = isMyRegisteredTeam ? savedPid : null;
+
                 const takenInfo = getTakenInfo(av);
                 const isTakenByOther = Boolean(takenInfo && takenInfo.id !== myPid);
                 const isMyTeam = Boolean(takenInfo && takenInfo.id === myPid);

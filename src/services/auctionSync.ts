@@ -192,13 +192,29 @@ export async function joinRoom(
     };
   }
 
+  const cleanNameLower = participant.name.trim().toLowerCase();
   const existingParticipants = Object.values(room.participants || {});
-  const isSameParticipant = Boolean(room.participants?.[participant.id]);
 
-  // Strict check: No duplicate team names or duplicate IPL franchises allowed!
+  // SAFETY FIX FOR MULTI-TAB & DUPLICATED TAB BROWSING:
+  // If participant.id already exists in room, but the registered name is DIFFERENT,
+  // then two tabs or sessions shared an ID (from cloned storage or duplicate tabs).
+  // They are two distinct contestants! Assign a new unique participant ID.
+  let finalParticipantId = participant.id;
+  const existingSameId = room.participants?.[participant.id];
+  if (existingSameId && existingSameId.name.trim().toLowerCase() !== cleanNameLower) {
+    finalParticipantId = `tm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    console.log(`[auctionSync] Tab clash detected. Separated "${participant.name}" into new participantId: ${finalParticipantId}`);
+  }
+
+  const finalParticipant = {
+    ...participant,
+    id: finalParticipantId
+  };
+
+  const isSameParticipant = Boolean(room.participants?.[finalParticipantId]);
+
+  // Strict check: No duplicate team names or duplicate franchise emblems allowed!
   if (!isSameParticipant) {
-    const cleanNameLower = participant.name.trim().toLowerCase();
-
     // 1. Check duplicate name
     const duplicateName = existingParticipants.find(
       (p) => p.name.trim().toLowerCase() === cleanNameLower
@@ -207,7 +223,7 @@ export async function joinRoom(
       throw new Error(`The team name "${participant.name}" is already taken! Each team must have a unique name.`);
     }
 
-    // 2. Check duplicate IPL team avatar/logo
+    // 2. Check duplicate franchise emblem/avatar
     const duplicateAvatar = existingParticipants.find((p) => {
       if (!p.avatar || !participant.avatar) return false;
       const pLogo = p.avatar.split('?')[0].toLowerCase();
@@ -215,13 +231,13 @@ export async function joinRoom(
       return pLogo === newLogo;
     });
     if (duplicateAvatar) {
-      throw new Error(`This IPL franchise has already been chosen by "${duplicateAvatar.name}"! No duplicate franchises are allowed in this arena.`);
+      throw new Error(`This franchise has already been chosen by "${duplicateAvatar.name}"! No duplicate franchises are allowed in this arena.`);
     }
   }
 
-  const existingParticipant = room.participants?.[participant.id];
+  const existingParticipant = room.participants?.[finalParticipantId];
   const fullParticipant: AuctionParticipant = {
-    ...participant,
+    ...finalParticipant,
     purse: existingParticipant ? existingParticipant.purse : room.initialPurse,
     initialPurse: room.initialPurse,
     wonLots: existingParticipant ? existingParticipant.wonLots : []
@@ -231,7 +247,7 @@ export async function joinRoom(
     ...room,
     participants: {
       ...(room.participants || {}),
-      [participant.id]: fullParticipant
+      [finalParticipantId]: fullParticipant
     },
     updatedAt: Date.now()
   };
