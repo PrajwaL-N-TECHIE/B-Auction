@@ -67,12 +67,10 @@ export const ProjectorModal: FC<ProjectorModalProps> = ({
 
   const getJoinUrl = () => {
     if (typeof window !== 'undefined') {
-      const hostname = window.location.hostname;
-      const port = window.location.port ? `:${window.location.port}` : '';
-      if (hostname === 'localhost' || hostname === '127.0.0.1') {
-        return `http://192.168.1.6${port}/?room=${room.code}`;
-      }
-      return `${window.location.origin}/?room=${room.code}`;
+      const url = new URL(window.location.href);
+      url.search = `?room=${room.code}`;
+      url.hash = '';
+      return url.toString();
     }
     return `https://auction.buildicy.com/?room=${room.code}`;
   };

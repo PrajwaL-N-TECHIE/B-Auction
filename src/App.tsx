@@ -3,7 +3,7 @@ import { Header } from './components/Header';
 import { LobbyView } from './components/LobbyView';
 import { HostView } from './components/HostView';
 import { PlayerView } from './components/PlayerView';
-import { subscribeRoom, getCachedRoom } from './services/auctionSync';
+import { subscribeRoom, getCachedRoom, registerHost, unregisterHost } from './services/auctionSync';
 import type { AuctionRoom, AuctionParticipant } from './types/auction';
 
 export default function App() {
@@ -62,6 +62,9 @@ export default function App() {
           if (cached) {
             setRoomCode(cleanCode);
             setRole(savedRole);
+            if (savedRole === 'host') {
+              registerHost(cleanCode);
+            }
             setCurrentRoom(cached);
             if (savedRole === 'player' && savedPid && cached.participants[savedPid]) {
               setCurrentParticipant(cached.participants[savedPid]);
@@ -79,20 +82,25 @@ export default function App() {
       return;
     }
 
-    const unsubscribe = subscribeRoom(roomCode, (updatedRoom) => {
-      setCurrentRoom(updatedRoom);
-      if (currentParticipant && updatedRoom.participants[currentParticipant.id]) {
-        setCurrentParticipant(updatedRoom.participants[currentParticipant.id]);
-      }
-    });
+    const unsubscribe = subscribeRoom(
+      roomCode,
+      (updatedRoom) => {
+        setCurrentRoom(updatedRoom);
+        if (currentParticipant && updatedRoom.participants[currentParticipant.id]) {
+          setCurrentParticipant(updatedRoom.participants[currentParticipant.id]);
+        }
+      },
+      role || 'player'
+    );
 
     return () => {
       unsubscribe();
     };
-  }, [roomCode, currentParticipant?.id]);
+  }, [roomCode, role, currentParticipant?.id]);
 
   const handleJoinAsHost = (code: string) => {
     const cleanCode = code.toUpperCase().trim();
+    registerHost(cleanCode);
     setRole('host');
     setRoomCode(cleanCode);
     try {
@@ -141,6 +149,9 @@ export default function App() {
   };
 
   const handleLeaveRoom = () => {
+    if (roomCode) {
+      unregisterHost(roomCode);
+    }
     setRole(null);
     setRoomCode(null);
     setCurrentRoom(null);

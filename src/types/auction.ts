@@ -67,4 +67,24 @@ export interface AuctionRoom {
   participants: Record<string, AuctionParticipant>;
   createdAt: number;
   updatedAt: number;
+  version: number; // Monotonically increasing revision counter to eliminate race conditions & blinking
 }
+
+export interface PlayerJoinEvent {
+  code: string;
+  participant: Omit<AuctionParticipant, 'purse' | 'initialPurse' | 'wonLots'>;
+}
+
+export interface PlayerBidEvent {
+  code: string;
+  lotIndex: number;
+  participantId: string;
+  amount: number;
+  timestamp: number;
+}
+
+export interface RequestSyncEvent {
+  code: string;
+  requesterId?: string;
+}
+

@@ -1,12 +1,22 @@
 import { supabase } from '../lib/supabase';
 import type { RealtimeChannel } from '@supabase/supabase-js';
-import type { AuctionRoom, AuctionParticipant, BidEntry, AuctionLot } from '../types/auction';
+import type {
+  AuctionRoom,
+  AuctionParticipant,
+  BidEntry,
+  AuctionLot,
+  PlayerJoinEvent,
+  PlayerBidEvent,
+  RequestSyncEvent
+} from '../types/auction';
 import { SAMPLE_LOT_PACKS } from '../constants/samplePacks';
 
 const localRoomCache: Record<string, AuctionRoom> = {};
 const subscribers: Record<string, ((room: AuctionRoom) => void)[]> = {};
 const localChannels: Record<string, BroadcastChannel> = {};
 const supabaseChannels: Record<string, RealtimeChannel> = {};
+const hostRooms: Set<string> = new Set();
+const hostJoinDebounceTimers: Record<string, any> = {};
 
 export function generateRoomCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -15,6 +25,35 @@ export function generateRoomCode(): string {
     rand += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return `AUC-${rand}`;
+}
+
+export function registerHost(code: string): void {
+  const cleanCode = code.toUpperCase().trim();
+  hostRooms.add(cleanCode);
+  try {
+    sessionStorage.setItem(`bauction_is_host_${cleanCode}`, 'true');
+  } catch {}
+}
+
+export function unregisterHost(code: string): void {
+  const cleanCode = code.toUpperCase().trim();
+  hostRooms.delete(cleanCode);
+  try {
+    sessionStorage.removeItem(`bauction_is_host_${cleanCode}`);
+  } catch {}
+}
+
+export function isHost(code: string): boolean {
+  const cleanCode = code.toUpperCase().trim();
+  if (hostRooms.has(cleanCode)) return true;
+  try {
+    return (
+      sessionStorage.getItem(`bauction_is_host_${cleanCode}`) === 'true' ||
+      sessionStorage.getItem('bauction_tab_role') === 'host'
+    );
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -32,7 +71,8 @@ function getLocalChannel(code: string): BroadcastChannel | null {
 }
 
 /**
- * Get or create Supabase Realtime WebSocket channel for instant sub-20ms cross-device sync
+ * Get or create Supabase Realtime WebSocket channel with self: false
+ * to strictly prevent echo feedback loops
  */
 export function getSupabaseChannel(code: string): RealtimeChannel {
   const cleanCode = code.toUpperCase().trim();
@@ -41,8 +81,8 @@ export function getSupabaseChannel(code: string): RealtimeChannel {
     supabaseChannels[channelName] = supabase.channel(channelName, {
       config: {
         broadcast: {
-          self: true,
-          ack: true
+          self: false, // NEVER deliver to self to prevent echo feedback loops
+          ack: false
         }
       }
     });
@@ -51,26 +91,37 @@ export function getSupabaseChannel(code: string): RealtimeChannel {
 }
 
 /**
- * Broadcast room update instantly across Supabase WebSockets, local tabs, and memory
+ * Notify in-memory listeners and persist to localStorage
  */
-export async function broadcastRoomUpdate(code: string, room: AuctionRoom): Promise<void> {
+function notifyListeners(code: string, room: AuctionRoom) {
   const cleanCode = code.toUpperCase().trim();
   localRoomCache[cleanCode] = room;
 
-  // 1. Persist to localStorage
   try {
     localStorage.setItem(`bauction_room_${cleanCode}`, JSON.stringify(room));
   } catch {}
 
-  // 2. Notify in-memory listeners
   const listeners = subscribers[cleanCode];
   if (listeners) {
-    listeners.forEach(cb => {
-      try { cb(room); } catch (e) { console.warn('Listener callback error:', e); }
+    listeners.forEach((cb) => {
+      try {
+        cb(room);
+      } catch (e) {
+        console.warn('Listener callback error:', e);
+      }
     });
   }
+}
 
-  // 3. Send over local BroadcastChannel for multi-tab localhost sync
+/**
+ * Host-only authoritative room broadcast:
+ * Delivers room update to all connected bidders, projector screens, and local tabs.
+ */
+export async function hostBroadcastRoom(code: string, room: AuctionRoom): Promise<void> {
+  const cleanCode = code.toUpperCase().trim();
+  notifyListeners(cleanCode, room);
+
+  // 1. Send over local BroadcastChannel for multi-tab localhost sync
   const localCh = getLocalChannel(cleanCode);
   if (localCh) {
     try {
@@ -78,21 +129,157 @@ export async function broadcastRoomUpdate(code: string, room: AuctionRoom): Prom
     } catch {}
   }
 
-  // 4. Send over Supabase Realtime WebSockets to all connected phones & laptops
+  // 2. Send over Supabase Realtime WebSockets to all connected phones & laptops
   try {
     const sbChan = getSupabaseChannel(cleanCode);
-    await sbChan.send({
+    sbChan.send({
       type: 'broadcast',
       event: 'ROOM_UPDATE',
       payload: room
-    });
+    }).catch(() => {});
   } catch (err) {
     console.warn('[Supabase Realtime] Broadcast warn:', err);
   }
 }
 
+// Backwards compatibility alias for host actions
+export const broadcastRoomUpdate = hostBroadcastRoom;
+
 /**
- * Create a new Auction Arena
+ * Monotonically apply incoming ROOM_UPDATE:
+ * Strictly prevents out-of-order, stale packets from reverting the UI.
+ */
+function applyIncomingRoomUpdate(code: string, incomingRoom: AuctionRoom) {
+  const cleanCode = code.toUpperCase().trim();
+  const current = localRoomCache[cleanCode];
+
+  if (current) {
+    // Monotonic version check: Discard older revisions
+    if ((incomingRoom.version || 0) < (current.version || 0)) {
+      return;
+    }
+  }
+
+  notifyListeners(cleanCode, incomingRoom);
+}
+
+/**
+ * Host handler for participant joining:
+ * Batches incoming joins so 80 concurrent bidders don't flood the channel with 80 room updates.
+ */
+function handleHostPlayerJoin(
+  code: string,
+  participant: Omit<AuctionParticipant, 'purse' | 'initialPurse' | 'wonLots'>
+) {
+  const cleanCode = code.toUpperCase().trim();
+  const room = localRoomCache[cleanCode] || getCachedRoom(cleanCode);
+  if (!room) return;
+
+  const currentParticipants = room.participants || {};
+  let finalParticipantId = participant.id;
+  const cleanNameLower = participant.name.trim().toLowerCase();
+
+  // If already present with same data, don't spam updates
+  if (currentParticipants[finalParticipantId] && currentParticipants[finalParticipantId].name === participant.name) {
+    return;
+  }
+
+  const existingSameId = currentParticipants[participant.id];
+  if (existingSameId && existingSameId.name.trim().toLowerCase() !== cleanNameLower) {
+    finalParticipantId = `tm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  }
+
+  const existingParticipant = currentParticipants[finalParticipantId];
+  const fullParticipant: AuctionParticipant = {
+    ...participant,
+    id: finalParticipantId,
+    purse: existingParticipant ? existingParticipant.purse : room.initialPurse,
+    initialPurse: room.initialPurse,
+    wonLots: existingParticipant ? existingParticipant.wonLots : []
+  };
+
+  const updatedParticipants = {
+    ...currentParticipants,
+    [finalParticipantId]: fullParticipant
+  };
+
+  const nextRoom: AuctionRoom = {
+    ...room,
+    participants: updatedParticipants,
+    version: (room.version || 0) + 1,
+    updatedAt: Date.now()
+  };
+
+  localRoomCache[cleanCode] = nextRoom;
+
+  // Debounce broadcast by 50ms so concurrent joins are bundled cleanly
+  if (hostJoinDebounceTimers[cleanCode]) {
+    clearTimeout(hostJoinDebounceTimers[cleanCode]);
+  }
+  hostJoinDebounceTimers[cleanCode] = setTimeout(() => {
+    delete hostJoinDebounceTimers[cleanCode];
+    const latest = localRoomCache[cleanCode];
+    if (latest) {
+      hostBroadcastRoom(cleanCode, latest);
+    }
+  }, 50);
+}
+
+/**
+ * Host handler for placing a bid:
+ * Atomic, conflict-free, sequential price assignment.
+ */
+function handleHostPlayerBid(code: string, payload: PlayerBidEvent) {
+  const cleanCode = code.toUpperCase().trim();
+  const room = localRoomCache[cleanCode] || getCachedRoom(cleanCode);
+  if (!room) return;
+
+  // 1. Verify auction is active
+  if (room.status !== 'active') return;
+
+  // 2. Verify lot index matches
+  if (payload.lotIndex !== room.currentLotIndex) return;
+
+  const participant = room.participants?.[payload.participantId];
+  if (!participant) return;
+
+  // 3. Verify purse balance
+  if (participant.purse < payload.amount) return;
+
+  // 4. Verify amount is strictly higher than current bid (or >= basePrice if no bids yet)
+  const isHigher = room.highestBidder === null ? payload.amount >= room.currentBid : payload.amount > room.currentBid;
+  if (!isHigher) return;
+
+  const newBid: BidEntry = {
+    id: `bid_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    participantId: participant.id,
+    bidderName: participant.name,
+    avatar: participant.avatar,
+    amount: Number(payload.amount.toFixed(2)),
+    timestamp: payload.timestamp || Date.now()
+  };
+
+  const updatedRoom: AuctionRoom = {
+    ...room,
+    currentBid: newBid.amount,
+    highestBidder: {
+      participantId: participant.id,
+      name: participant.name,
+      avatar: participant.avatar,
+      amount: newBid.amount
+    },
+    gavelPhase: 'idle',
+    gavelCountdown: 10,
+    bids: [newBid, ...(room.bids || [])].slice(0, 40),
+    version: (room.version || 0) + 1,
+    updatedAt: Date.now()
+  };
+
+  hostBroadcastRoom(cleanCode, updatedRoom);
+}
+
+/**
+ * Create a new Auction Arena (Host Action)
  */
 export async function createRoom(
   code: string,
@@ -102,10 +289,12 @@ export async function createRoom(
   customIncrement?: number
 ): Promise<AuctionRoom> {
   const cleanCode = code.toUpperCase().trim();
-  const selectedPack = SAMPLE_LOT_PACKS.find(p => p.id === packId) || SAMPLE_LOT_PACKS[0];
+  registerHost(cleanCode);
 
+  const selectedPack = SAMPLE_LOT_PACKS.find((p) => p.id === packId) || SAMPLE_LOT_PACKS[0];
   const purse = customPurse !== undefined && customPurse > 0 ? customPurse : selectedPack.defaultPurse;
-  const increment = customIncrement !== undefined && customIncrement > 0 ? customIncrement : selectedPack.minIncrement;
+  const increment =
+    customIncrement !== undefined && customIncrement > 0 ? customIncrement : selectedPack.minIncrement;
 
   const initialLots: AuctionLot[] = selectedPack.lots.map((lot, index) => ({
     ...lot,
@@ -131,28 +320,18 @@ export async function createRoom(
     bids: [],
     participants: {},
     createdAt: Date.now(),
-    updatedAt: Date.now()
+    updatedAt: Date.now(),
+    version: 1
   };
 
-  // Ensure channel is subscribed so broadcast goes through immediately
-  const sbChan = getSupabaseChannel(cleanCode);
-  await new Promise<void>((resolve) => {
-    sbChan.subscribe((status) => {
-      if (status === 'SUBSCRIBED' || status === 'CHANNEL_ERROR') {
-        resolve();
-      }
-    });
-    // Fallback timeout in case already subscribed or offline
-    setTimeout(resolve, 800);
-  });
-
-  await broadcastRoomUpdate(cleanCode, initialRoom);
-  console.log(`[Supabase Realtime] Auction Arena ${cleanCode} created successfully!`);
+  await hostBroadcastRoom(cleanCode, initialRoom);
   return initialRoom;
 }
 
 /**
- * Join Room as a Franchise / Bidder
+ * Join Room as a Franchise / Bidder:
+ * Emits lightweight PLAYER_JOIN and REQUEST_SYNC events.
+ * Bidders NEVER broadcast full room states!
  */
 export async function joinRoom(
   code: string,
@@ -162,104 +341,93 @@ export async function joinRoom(
   let room = getCachedRoom(cleanCode);
 
   if (!room) {
-    // Attempt fallback from localStorage
     try {
       const stored = localStorage.getItem(`bauction_room_${cleanCode}`);
       if (stored) room = JSON.parse(stored);
     } catch {}
   }
 
-  if (!room) {
-    // Joining before host state arrived: initialize fallback template
-    room = {
-      code: cleanCode,
-      title: 'Premier Cricket Auction (IPL Mega Auction)',
-      currencySymbol: '₹',
-      unitLabel: 'Cr',
-      initialPurse: 100,
-      minIncrement: 0.25,
-      status: 'active',
-      currentLotIndex: 0,
-      lots: SAMPLE_LOT_PACKS[0].lots,
-      currentBid: SAMPLE_LOT_PACKS[0].lots[0].basePrice,
-      highestBidder: null,
-      gavelPhase: 'idle',
-      gavelCountdown: 10,
-      bids: [],
-      participants: {},
-      createdAt: Date.now(),
-      updatedAt: Date.now()
-    };
-  }
-
-  const cleanNameLower = participant.name.trim().toLowerCase();
-  const existingParticipants = Object.values(room.participants || {});
-
-  // SAFETY FIX FOR MULTI-TAB & DUPLICATED TAB BROWSING:
-  // If participant.id already exists in room, but the registered name is DIFFERENT,
-  // then two tabs or sessions shared an ID (from cloned storage or duplicate tabs).
-  // They are two distinct contestants! Assign a new unique participant ID.
-  let finalParticipantId = participant.id;
-  const existingSameId = room.participants?.[participant.id];
-  if (existingSameId && existingSameId.name.trim().toLowerCase() !== cleanNameLower) {
-    finalParticipantId = `tm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    console.log(`[auctionSync] Tab clash detected. Separated "${participant.name}" into new participantId: ${finalParticipantId}`);
-  }
-
-  const finalParticipant = {
-    ...participant,
-    id: finalParticipantId
+  const baseRoom: AuctionRoom = room || {
+    code: cleanCode,
+    title: 'Premier Cricket Auction (IPL Mega Auction)',
+    currencySymbol: '₹',
+    unitLabel: 'Cr',
+    initialPurse: 100,
+    minIncrement: 0.25,
+    status: 'active',
+    currentLotIndex: 0,
+    lots: SAMPLE_LOT_PACKS[0].lots,
+    currentBid: SAMPLE_LOT_PACKS[0].lots[0].basePrice,
+    highestBidder: null,
+    gavelPhase: 'idle',
+    gavelCountdown: 10,
+    bids: [],
+    participants: {},
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    version: 1
   };
 
-  const isSameParticipant = Boolean(room.participants?.[finalParticipantId]);
-
-  // Strict check: No duplicate team names or duplicate franchise emblems allowed!
-  if (!isSameParticipant) {
-    // 1. Check duplicate name
-    const duplicateName = existingParticipants.find(
-      (p) => p.name.trim().toLowerCase() === cleanNameLower
-    );
-    if (duplicateName) {
-      throw new Error(`The team name "${participant.name}" is already taken! Each team must have a unique name.`);
-    }
-
-    // 2. Check duplicate franchise emblem/avatar
-    const duplicateAvatar = existingParticipants.find((p) => {
-      if (!p.avatar || !participant.avatar) return false;
-      const pLogo = p.avatar.split('?')[0].toLowerCase();
-      const newLogo = participant.avatar.split('?')[0].toLowerCase();
-      return pLogo === newLogo;
-    });
-    if (duplicateAvatar) {
-      throw new Error(`This franchise has already been chosen by "${duplicateAvatar.name}"! No duplicate franchises are allowed in this arena.`);
-    }
-  }
-
-  const existingParticipant = room.participants?.[finalParticipantId];
+  // Optimistically register in local cache
   const fullParticipant: AuctionParticipant = {
-    ...finalParticipant,
-    purse: existingParticipant ? existingParticipant.purse : room.initialPurse,
-    initialPurse: room.initialPurse,
-    wonLots: existingParticipant ? existingParticipant.wonLots : []
+    ...participant,
+    purse: baseRoom.initialPurse,
+    initialPurse: baseRoom.initialPurse,
+    wonLots: []
   };
 
   const updatedRoom: AuctionRoom = {
-    ...room,
+    ...baseRoom,
     participants: {
-      ...(room.participants || {}),
-      [finalParticipantId]: fullParticipant
-    },
-    updatedAt: Date.now()
+      ...(baseRoom.participants || {}),
+      [participant.id]: fullParticipant
+    }
+  };
+  localRoomCache[cleanCode] = updatedRoom;
+  notifyListeners(cleanCode, updatedRoom);
+
+  const joinPayload: PlayerJoinEvent = {
+    code: cleanCode,
+    participant
   };
 
-  await broadcastRoomUpdate(cleanCode, updatedRoom);
+  // 1. Broadcast to local tabs
+  const localCh = getLocalChannel(cleanCode);
+  localCh?.postMessage({ type: 'PLAYER_JOIN', payload: joinPayload });
+
+  // 2. Broadcast PLAYER_JOIN event to Host via Supabase WebSockets
+  try {
+    const sbChan = getSupabaseChannel(cleanCode);
+    sbChan.send({
+      type: 'broadcast',
+      event: 'PLAYER_JOIN',
+      payload: joinPayload
+    }).catch(() => {});
+  } catch (e) {}
+
+  // 3. Request current authoritative room from Host
+  try {
+    const sbChan = getSupabaseChannel(cleanCode);
+    sbChan.send({
+      type: 'broadcast',
+      event: 'REQUEST_SYNC',
+      payload: { code: cleanCode, requesterId: participant.id } as RequestSyncEvent
+    }).catch(() => {});
+  } catch (e) {}
+
   return updatedRoom;
 }
 
 /**
- * Place a Bid in the Auction Arena
+ * Place a Bid in the Auction Arena (Bidder Action):
+ * Emits lightweight PLAYER_BID event to Host.
+ * Host validates purse, enforces price increment, and broadcasts ROOM_UPDATE.
  */
-export async function placeBid(code: string, participantId: string, amount: number): Promise<AuctionRoom> {
+export async function placeBid(
+  code: string,
+  participantId: string,
+  amount: number
+): Promise<AuctionRoom> {
   const cleanCode = code.toUpperCase().trim();
   const room = getCachedRoom(cleanCode);
   if (!room) throw new Error('Auction room not found');
@@ -267,49 +435,59 @@ export async function placeBid(code: string, participantId: string, amount: numb
   const participant = room.participants?.[participantId];
   if (!participant) throw new Error('Participant not registered in this arena');
 
-  // Verify purse balance
   if (participant.purse < amount) {
-    throw new Error(`Insufficient purse balance! You have ${room.currencySymbol}${participant.purse.toFixed(2)} ${room.unitLabel}`);
+    throw new Error(
+      `Insufficient purse balance! You have ${room.currencySymbol}${participant.purse.toFixed(2)} ${room.unitLabel}`
+    );
   }
 
-  // Verify amount is strictly greater than current bid
   if (amount <= room.currentBid && room.highestBidder !== null) {
-    throw new Error(`Bid must be higher than current bid (${room.currencySymbol}${room.currentBid.toFixed(2)} ${room.unitLabel})`);
+    throw new Error(
+      `Bid must be higher than current bid (${room.currencySymbol}${room.currentBid.toFixed(2)} ${room.unitLabel})`
+    );
   }
 
-  const newBid: BidEntry = {
-    id: `bid_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-    participantId: participant.id,
-    bidderName: participant.name,
-    avatar: participant.avatar,
-    amount: Number(amount.toFixed(2)),
+  const bidEvent: PlayerBidEvent = {
+    code: cleanCode,
+    lotIndex: room.currentLotIndex,
+    participantId,
+    amount,
     timestamp: Date.now()
   };
 
-  const updatedRoom: AuctionRoom = {
-    ...room,
-    currentBid: newBid.amount,
-    highestBidder: {
-      participantId: participant.id,
-      name: participant.name,
-      avatar: participant.avatar,
-      amount: newBid.amount
-    },
-    gavelPhase: 'idle',
-    gavelCountdown: 10,
-    bids: [newBid, ...(room.bids || [])].slice(0, 40),
-    updatedAt: Date.now()
-  };
+  // If this client is Host, process directly
+  if (isHost(cleanCode)) {
+    handleHostPlayerBid(cleanCode, bidEvent);
+    return localRoomCache[cleanCode] || room;
+  }
 
-  await broadcastRoomUpdate(cleanCode, updatedRoom);
-  return updatedRoom;
+  // 1. Send via local broadcast channel
+  const localCh = getLocalChannel(cleanCode);
+  localCh?.postMessage({ type: 'PLAYER_BID', payload: bidEvent });
+
+  // 2. Send PLAYER_BID event to Host via Supabase WebSockets
+  try {
+    const sbChan = getSupabaseChannel(cleanCode);
+    sbChan.send({
+      type: 'broadcast',
+      event: 'PLAYER_BID',
+      payload: bidEvent
+    }).catch(() => {});
+  } catch (e) {}
+
+  return room;
 }
 
 /**
  * Set Gavel Countdown Phase (Host Action: Going Once / Going Twice)
  */
-export async function setGavelPhase(code: string, phase: AuctionRoom['gavelPhase'], countdown?: number): Promise<AuctionRoom> {
+export async function setGavelPhase(
+  code: string,
+  phase: AuctionRoom['gavelPhase'],
+  countdown?: number
+): Promise<AuctionRoom> {
   const cleanCode = code.toUpperCase().trim();
+  registerHost(cleanCode);
   const room = getCachedRoom(cleanCode);
   if (!room) throw new Error('Room not found');
 
@@ -317,10 +495,11 @@ export async function setGavelPhase(code: string, phase: AuctionRoom['gavelPhase
     ...room,
     gavelPhase: phase,
     gavelCountdown: countdown !== undefined ? countdown : room.gavelCountdown,
+    version: (room.version || 0) + 1,
     updatedAt: Date.now()
   };
 
-  await broadcastRoomUpdate(cleanCode, updatedRoom);
+  await hostBroadcastRoom(cleanCode, updatedRoom);
   return updatedRoom;
 }
 
@@ -329,6 +508,7 @@ export async function setGavelPhase(code: string, phase: AuctionRoom['gavelPhase
  */
 export async function sellCurrentLot(code: string): Promise<AuctionRoom> {
   const cleanCode = code.toUpperCase().trim();
+  registerHost(cleanCode);
   const room = getCachedRoom(cleanCode);
   if (!room) throw new Error('Room not found');
 
@@ -369,10 +549,11 @@ export async function sellCurrentLot(code: string): Promise<AuctionRoom> {
     lots: updatedLots,
     participants: updatedParticipants,
     gavelPhase: 'sold',
+    version: (room.version || 0) + 1,
     updatedAt: Date.now()
   };
 
-  await broadcastRoomUpdate(cleanCode, updatedRoom);
+  await hostBroadcastRoom(cleanCode, updatedRoom);
   return updatedRoom;
 }
 
@@ -381,6 +562,7 @@ export async function sellCurrentLot(code: string): Promise<AuctionRoom> {
  */
 export async function passCurrentLot(code: string): Promise<AuctionRoom> {
   const cleanCode = code.toUpperCase().trim();
+  registerHost(cleanCode);
   const room = getCachedRoom(cleanCode);
   if (!room) throw new Error('Room not found');
 
@@ -397,10 +579,11 @@ export async function passCurrentLot(code: string): Promise<AuctionRoom> {
     ...room,
     lots: updatedLots,
     gavelPhase: 'unsold',
+    version: (room.version || 0) + 1,
     updatedAt: Date.now()
   };
 
-  await broadcastRoomUpdate(cleanCode, updatedRoom);
+  await hostBroadcastRoom(cleanCode, updatedRoom);
   return updatedRoom;
 }
 
@@ -409,6 +592,7 @@ export async function passCurrentLot(code: string): Promise<AuctionRoom> {
  */
 export async function navigateLot(code: string, direction: 'next' | 'prev'): Promise<AuctionRoom> {
   const cleanCode = code.toUpperCase().trim();
+  registerHost(cleanCode);
   const room = getCachedRoom(cleanCode);
   if (!room) throw new Error('Room not found');
 
@@ -427,28 +611,40 @@ export async function navigateLot(code: string, direction: 'next' | 'prev'): Pro
     currentLotIndex: newIndex,
     lots: updatedLots,
     currentBid: targetLot?.soldTo ? targetLot.soldTo.amount : targetLot?.basePrice || 1.0,
-    highestBidder: targetLot?.soldTo ? {
-      participantId: targetLot.soldTo.participantId,
-      name: targetLot.soldTo.name,
-      avatar: targetLot.soldTo.avatar,
-      amount: targetLot.soldTo.amount
-    } : null,
-    gavelPhase: targetLot?.status === 'sold' ? 'sold' : targetLot?.status === 'unsold' ? 'unsold' : 'idle',
+    highestBidder: targetLot?.soldTo
+      ? {
+          participantId: targetLot.soldTo.participantId,
+          name: targetLot.soldTo.name,
+          avatar: targetLot.soldTo.avatar,
+          amount: targetLot.soldTo.amount
+        }
+      : null,
+    gavelPhase:
+      targetLot?.status === 'sold' ? 'sold' : targetLot?.status === 'unsold' ? 'unsold' : 'idle',
     gavelCountdown: 10,
     bids: [],
+    version: (room.version || 0) + 1,
     updatedAt: Date.now()
   };
 
-  await broadcastRoomUpdate(cleanCode, updatedRoom);
+  await hostBroadcastRoom(cleanCode, updatedRoom);
   return updatedRoom;
 }
 
 /**
  * Subscribe to Real-Time Room Updates
- * Powered by Supabase Realtime WebSockets for zero-reload sub-20ms cross-device sync!
+ * Powered by Supabase Realtime WebSockets with authoritative host coordination.
  */
-export function subscribeRoom(code: string, onUpdate: (room: AuctionRoom) => void): () => void {
+export function subscribeRoom(
+  code: string,
+  onUpdate: (room: AuctionRoom) => void,
+  clientRole: 'host' | 'player' = 'player'
+): () => void {
   const cleanCode = code.toUpperCase().trim();
+
+  if (clientRole === 'host') {
+    registerHost(cleanCode);
+  }
 
   if (!subscribers[cleanCode]) {
     subscribers[cleanCode] = [];
@@ -464,9 +660,26 @@ export function subscribeRoom(code: string, onUpdate: (room: AuctionRoom) => voi
   // 2. Local BroadcastChannel listener (multi-tab sync)
   const localCh = getLocalChannel(cleanCode);
   const handleLocalMsg = (ev: MessageEvent) => {
-    if (ev.data?.type === 'ROOM_UPDATE' && ev.data.room?.code === cleanCode) {
-      localRoomCache[cleanCode] = ev.data.room;
-      onUpdate(ev.data.room);
+    const data = ev.data;
+    if (!data) return;
+
+    if (data.type === 'ROOM_UPDATE' && data.room?.code === cleanCode) {
+      applyIncomingRoomUpdate(cleanCode, data.room);
+    } else if (data.type === 'PLAYER_JOIN' && data.payload?.code === cleanCode) {
+      if (isHost(cleanCode)) {
+        handleHostPlayerJoin(cleanCode, data.payload.participant);
+      }
+    } else if (data.type === 'PLAYER_BID' && data.payload?.code === cleanCode) {
+      if (isHost(cleanCode)) {
+        handleHostPlayerBid(cleanCode, data.payload);
+      }
+    } else if (data.type === 'REQUEST_SYNC' && data.payload?.code === cleanCode) {
+      if (isHost(cleanCode)) {
+        const current = localRoomCache[cleanCode];
+        if (current) {
+          hostBroadcastRoom(cleanCode, current);
+        }
+      }
     }
   };
   localCh?.addEventListener('message', handleLocalMsg);
@@ -477,55 +690,69 @@ export function subscribeRoom(code: string, onUpdate: (room: AuctionRoom) => voi
   sbChan
     .on('broadcast', { event: 'ROOM_UPDATE' }, (msg) => {
       if (msg.payload && msg.payload.code === cleanCode) {
-        localRoomCache[cleanCode] = msg.payload;
-        try {
-          localStorage.setItem(`bauction_room_${cleanCode}`, JSON.stringify(msg.payload));
-        } catch {}
-        onUpdate(msg.payload);
+        applyIncomingRoomUpdate(cleanCode, msg.payload as AuctionRoom);
+      }
+    })
+    .on('broadcast', { event: 'PLAYER_JOIN' }, (msg) => {
+      const payload = msg.payload as PlayerJoinEvent;
+      if (payload && payload.code === cleanCode) {
+        if (isHost(cleanCode)) {
+          handleHostPlayerJoin(cleanCode, payload.participant);
+        } else {
+          // Update local participant roster display
+          const cur = localRoomCache[cleanCode];
+          if (cur && payload.participant) {
+            const fullP: AuctionParticipant = {
+              ...payload.participant,
+              purse: cur.initialPurse,
+              initialPurse: cur.initialPurse,
+              wonLots: []
+            };
+            const upd: AuctionRoom = {
+              ...cur,
+              participants: {
+                ...(cur.participants || {}),
+                [payload.participant.id]: fullP
+              }
+            };
+            notifyListeners(cleanCode, upd);
+          }
+        }
+      }
+    })
+    .on('broadcast', { event: 'PLAYER_BID' }, (msg) => {
+      const payload = msg.payload as PlayerBidEvent;
+      if (payload && payload.code === cleanCode && isHost(cleanCode)) {
+        handleHostPlayerBid(cleanCode, payload);
       }
     })
     .on('broadcast', { event: 'REQUEST_SYNC' }, () => {
-      // If we have current room state (e.g. Host), broadcast it to newly joined bidders
-      const current = localRoomCache[cleanCode] || getCachedRoom(cleanCode);
-      if (current) {
-        sbChan.send({
-          type: 'broadcast',
-          event: 'ROOM_UPDATE',
-          payload: current
-        }).catch(() => {});
+      // ONLY the Host responds to sync requests to eliminate sync storms
+      if (isHost(cleanCode)) {
+        const current = localRoomCache[cleanCode];
+        if (current) {
+          hostBroadcastRoom(cleanCode, current);
+        }
       }
     });
 
-  // Ensure channel is subscribed and request state from host
+  // Ensure channel is subscribed and request initial state from host if bidder
   sbChan.subscribe((status) => {
     if (status === 'SUBSCRIBED') {
-      console.log(`[Supabase Realtime] Connected to auction channel: ${cleanCode}`);
-      // Request latest room state from any active host / peer
-      sbChan.send({
-        type: 'broadcast',
-        event: 'REQUEST_SYNC',
-        payload: {}
-      }).catch(() => {});
+      if (!isHost(cleanCode)) {
+        sbChan.send({
+          type: 'broadcast',
+          event: 'REQUEST_SYNC',
+          payload: { code: cleanCode }
+        }).catch(() => {});
+      }
     }
   });
 
-  // 4. Storage event listener fallback
-  const storageHandler = (e: StorageEvent) => {
-    if (e.key === `bauction_room_${cleanCode}` && e.newValue) {
-      try {
-        const parsed = JSON.parse(e.newValue);
-        localRoomCache[cleanCode] = parsed;
-        onUpdate(parsed);
-      } catch {}
-    }
-  };
-  window.addEventListener('storage', storageHandler);
-
   return () => {
-    window.removeEventListener('storage', storageHandler);
     localCh?.removeEventListener('message', handleLocalMsg);
     if (subscribers[cleanCode]) {
-      subscribers[cleanCode] = subscribers[cleanCode].filter(cb => cb !== onUpdate);
+      subscribers[cleanCode] = subscribers[cleanCode].filter((cb) => cb !== onUpdate);
     }
   };
 }
